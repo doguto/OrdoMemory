@@ -13,6 +13,8 @@ namespace OrdoMemory.Design
 
         SampleSchema[] data;
 
+        readonly BPlusTreeIndex<string> nameIndex = new(StringComparer.Ordinal);
+
         bool[] alive;
         long nextFreshKey;
 
@@ -41,6 +43,7 @@ namespace OrdoMemory.Design
             if (!TryAllocateKey(out var key)) return false;
 
             Store(key, record);
+            nameIndex.Insert(record.Name, key);
             return true;
         }
 
@@ -52,13 +55,17 @@ namespace OrdoMemory.Design
             var freshCount = Math.Max(0, records.Count - freeKeys.Count);
             if (!EnsureCapacity(nextFreshKey - start + freshCount)) return false;
 
+            var entries = new KeyValuePair<string, int>[records.Count];
             for (var i = 0; i < records.Count; i++)
             {
                 // 事前に拡張済みのため失敗しない.
                 TryAllocateKey(out var key);
                 Store(key, records[i]);
+                entries[i] = new KeyValuePair<string, int>(records[i].Name, key);
             }
 
+            // 索引は 1 件ずつ更新せず、まとめて構築する.
+            nameIndex.AddRange(entries);
             return true;
         }
 
@@ -66,6 +73,14 @@ namespace OrdoMemory.Design
         {
             if (record == null) throw new ArgumentNullException(nameof(record));
             if (!TryGetAliveIndex(record.Id, out var index)) return false;
+
+            // SecondaryKey が変わらない場合は、索引を更新しない.
+            var current = data[index];
+            if (!string.Equals(current.Name, record.Name, StringComparison.Ordinal))
+            {
+                nameIndex.Remove(current.Name, record.Id);
+                nameIndex.Insert(record.Name, record.Id);
+            }
 
             data[index] = record;
             return true;
@@ -75,6 +90,7 @@ namespace OrdoMemory.Design
         {
             if (!TryGetAliveIndex(key, out var index)) return false;
 
+            nameIndex.Remove(data[index].Name, key);
             data[index] = null;
             alive[index] = false;
             freeKeys.Push(key);
@@ -99,6 +115,23 @@ namespace OrdoMemory.Design
                 var index = (int)(key - start);
                 if (alive[index]) yield return data[index];
             }
+        }
+
+        public SampleSchema FindFirstByName(string name)
+        {
+            foreach (var key in nameIndex.Equal(name)) return Resolve(key);
+
+            return null;
+        }
+
+        public IEnumerable<SampleSchema> FindAllByName(string name)
+        {
+            foreach (var key in nameIndex.Equal(name)) yield return Resolve(key);
+        }
+
+        public IEnumerable<SampleSchema> FindRangeByName(string min, string max)
+        {
+            foreach (var key in nameIndex.Range(min, max)) yield return Resolve(key);
         }
 
         public IEnumerable<SampleSchema> All()
@@ -137,6 +170,12 @@ namespace OrdoMemory.Design
             data[index] = record;
             alive[index] = true;
             Count++;
+        }
+
+        // 索引が返す Key は常に使用中のため、生存確認は行わない.
+        SampleSchema Resolve(int key)
+        {
+            return data[(int)((long)key - start)];
         }
 
         bool TryGetAliveIndex(int key, out int index)
