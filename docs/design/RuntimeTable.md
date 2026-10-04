@@ -11,8 +11,8 @@ Record[] data;
 // スロットの使用状況. 削除済みスロットを All / FindRange で読み飛ばすために使う.
 bool[] alive;
 
-// 次に払い出す未使用の添字. 添字 highWater 以降は一度も使われていない.
-int highWater;
+// 次に払い出す未使用の Key. この Key 以降は一度も使われていない.
+Key nextFreshKey;
 
 // 削除によって空いた主キー. 再利用はこちらを優先する.
 Stack<Key> freeKeys;
@@ -22,7 +22,7 @@ Stack<Key> freeKeys;
 
 Runtime の DB であるため、主キーは DB 側で生成、割り当てるものとする.
 
-Insert 時は、まず `freeKeys` から取り出す. 空であれば `highWater` の添字に対応する Key を払い出し、`highWater` を進める.
+Insert 時は、まず `freeKeys` から取り出す. 空であれば `nextFreshKey` を払い出し、`nextFreshKey` を進める.
 削除等で無効化されたデータの Key は `freeKeys` に積まれる.
 未使用の Key を事前に全て積む必要が無いため、構築コストは `capacity` に依存しない.
 
@@ -40,7 +40,7 @@ Insert 時は、まず `freeKeys` から取り出す. 空であれば `highWater
 ### 容量と配列の拡張
 
 - 初期 `capacity` は構築時に指定する.
-- Insert / BulkInsert で `freeKeys` が空かつ `highWater == capacity` の場合、`data` と `alive` を拡張する.
+- Insert / BulkInsert で `freeKeys` が空かつ `nextFreshKey` の添字（`nextFreshKey - start`）が `capacity` に達している場合、`data` と `alive` を拡張する.
 - 拡張後の長さの上限は、次の小さいほうとする. 上限に達している場合は Insert を失敗させる.
   - `int` の配列最大長
   - `start + 長さ - 1` が Key 型の最大値以下となる長さ
