@@ -36,6 +36,7 @@ namespace OrdoMemory.Sample
             nextFreshKey = start;
         }
 
+        // 払い出された Key は record.Id に入る.
         public bool Insert(SampleSchema record)
         {
             if (record == null) throw new ArgumentNullException(nameof(record));
@@ -68,20 +69,22 @@ namespace OrdoMemory.Sample
             return true;
         }
 
-        public bool Update(SampleSchema record)
+        // 既存の record をその場で書き換える. 指定した項目だけを更新し、アロケーションは発生しない.
+        public bool Update(int key, Optional<string> name = default, Optional<string> description = default)
         {
-            if (record == null) throw new ArgumentNullException(nameof(record));
-            if (!TryGetAliveIndex(record.Id, out var index)) return false;
+            if (!TryGetAliveIndex(key, out var index)) return false;
 
-            // SecondaryKey が変わらない場合は、索引を更新しない.
+            // SecondaryKey が変わらない場合は、索引を更新しない. 索引は書き換え前の Name で引く.
             var current = data[index];
-            if (!string.Equals(current.Name, record.Name, StringComparison.Ordinal))
+            var newName = name.OrElse(current.Name);
+            if (!string.Equals(current.Name, newName, StringComparison.Ordinal))
             {
-                nameIndex.Remove(current.Name, record.Id);
-                nameIndex.Insert(record.Name, record.Id);
+                nameIndex.Remove(current.Name, key);
+                nameIndex.Insert(newName, key);
             }
 
-            data[index] = record;
+            current.Name = newName;
+            current.Description = description.OrElse(current.Description);
             return true;
         }
 
