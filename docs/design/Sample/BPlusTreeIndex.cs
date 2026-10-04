@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace OrdoMemory.Design
+namespace OrdoMemory.Sample
 {
     public sealed class BPlusTreeIndex<TKey>
     {

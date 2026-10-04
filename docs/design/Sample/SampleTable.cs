@@ -1,8 +1,7 @@
 using System;
 using System.Collections.Generic;
-using OrdoMemory.Sample;
 
-namespace OrdoMemory.Design
+namespace OrdoMemory.Sample
 {
     public class SampleTable
     {
