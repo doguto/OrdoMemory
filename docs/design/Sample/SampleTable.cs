@@ -39,7 +39,8 @@ namespace OrdoMemory.Sample
         // 払い出された Key は record.Id に入る.
         public bool Insert(SampleSchema record)
         {
-            if (record == null) throw new ArgumentNullException(nameof(record));
+            TableValidation.ThrowIfNull(record, nameof(record));
+            if (IsStored(record)) TableValidation.ThrowAlreadyInserted(nameof(record));
             if (!TryAllocateKey(out var key)) return false;
 
             Store(key, record);
@@ -49,7 +50,14 @@ namespace OrdoMemory.Sample
 
         public bool BulkInsert(IReadOnlyList<SampleSchema> records)
         {
-            if (records == null) throw new ArgumentNullException(nameof(records));
+            TableValidation.ThrowIfNull(records, nameof(records));
+
+            // Key の払い出しより前に検証する. 途中で失敗して、一部だけ挿入された状態になることを防ぐ.
+            TableValidation.ValidateRecords(records, nameof(records));
+            for (var i = 0; i < records.Count; i++)
+            {
+                if (IsStored(records[i])) TableValidation.ThrowAlreadyInserted(nameof(records), i);
+            }
 
             // freeKeys で賄えない分だけ、未使用の Key を払い出す.
             var freshCount = Math.Max(0, records.Count - freeKeys.Count);
@@ -178,6 +186,11 @@ namespace OrdoMemory.Sample
         SampleSchema Resolve(int key)
         {
             return data[(int)((long)key - start)];
+        }
+
+        bool IsStored(SampleSchema record)
+        {
+            return TryGetAliveIndex(record.Id, out var index) && ReferenceEquals(data[index], record);
         }
 
         bool TryGetAliveIndex(int key, out int index)
