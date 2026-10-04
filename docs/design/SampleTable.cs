@@ -4,34 +4,19 @@ using OrdoMemory.Sample;
 
 namespace OrdoMemory.Design
 {
-    /// <summary>
-    /// SampleSchema (Key = int) に対応する Runtime テーブルのサンプル実装.
-    /// 構造は docs/design/RuntimeTable.md に従う.
-    /// SampleSchema は SecondaryKey を持たないため、B+Tree 索引は含まない.
-    /// </summary>
     public class SampleTable
     {
-        // 配列の最大長 (Array.MaxLength 相当. Unity では参照できないため定数で保持する).
-        private const int MaxArrayLength = 0x7FFFFFC7;
+        const int MaxArrayLength = 0x7FFFFFC7;
+        const int MinGrowLength = 4;
 
-        // 初期 capacity が 0 の場合の最小拡張長.
-        private const int MinGrowLength = 4;
+        readonly int start;
 
-        // 添字 = 主キー - start.
-        private readonly int start;
+        SampleSchema[] data;
 
-        // 実データ.
-        private SampleSchema[] data;
+        bool[] alive;
+        long nextFreshKey;
 
-        // スロットの使用状況. 削除済みスロットを All / FindRange で読み飛ばすために使う.
-        private bool[] alive;
-
-        // 次に払い出す未使用の Key. この Key 以降は一度も使われていない.
-        // int.MaxValue の払い出し後にオーバーフローしないよう long で保持する.
-        private long nextFreshKey;
-
-        // 削除によって空いた主キー. 再利用はこちらを優先する.
-        private readonly Stack<int> freeKeys = new Stack<int>();
+        readonly Stack<int> freeKeys = new();
 
         public int Count { get; private set; }
 
@@ -50,26 +35,15 @@ namespace OrdoMemory.Design
             nextFreshKey = start;
         }
 
-        // ---- 書き込み ----
-
-        /// <summary>
-        /// Record を挿入する. Id は DB 側で割り当て、record.Id に書き戻す.
-        /// Key の上限に達している場合は何も挿入せず false を返す.
-        /// </summary>
         public bool Insert(SampleSchema record)
         {
             if (record == null) throw new ArgumentNullException(nameof(record));
-
             if (!TryAllocateKey(out var key)) return false;
 
             Store(key, record);
             return true;
         }
 
-        /// <summary>
-        /// Record を一括挿入する.
-        /// 必要な件数分を事前に拡張し、上限を超える場合は何も挿入せず false を返す.
-        /// </summary>
         public bool BulkInsert(IReadOnlyList<SampleSchema> records)
         {
             if (records == null) throw new ArgumentNullException(nameof(records));
@@ -88,9 +62,6 @@ namespace OrdoMemory.Design
             return true;
         }
 
-        /// <summary>
-        /// record.Id に対応する Record を置き換える. 対象が存在しない場合は false を返す.
-        /// </summary>
         public bool Update(SampleSchema record)
         {
             if (record == null) throw new ArgumentNullException(nameof(record));
@@ -100,9 +71,6 @@ namespace OrdoMemory.Design
             return true;
         }
 
-        /// <summary>
-        /// Key に対応する Record を削除する. 対象が存在しない場合は false を返す.
-        /// </summary>
         public bool Remove(int key)
         {
             if (!TryGetAliveIndex(key, out var index)) return false;
@@ -114,19 +82,12 @@ namespace OrdoMemory.Design
             return true;
         }
 
-        // ---- 読み取り ----
 
-        /// <summary>
-        /// Key での単一検索. 存在しない場合は null を返す.
-        /// </summary>
         public SampleSchema Find(int key)
         {
             return TryGetAliveIndex(key, out var index) ? data[index] : null;
         }
 
-        /// <summary>
-        /// Key の範囲 [min, max] での検索. Key の昇順で返す.
-        /// </summary>
         public IEnumerable<SampleSchema> FindRange(int min, int max)
         {
             // 未使用の領域 (nextFreshKey 以降) を読まないよう、範囲を使用済みの Key に絞る.
@@ -140,9 +101,6 @@ namespace OrdoMemory.Design
             }
         }
 
-        /// <summary>
-        /// 全 Record を Key の昇順で返す.
-        /// </summary>
         public IEnumerable<SampleSchema> All()
         {
             var used = (int)(nextFreshKey - start);
@@ -152,10 +110,8 @@ namespace OrdoMemory.Design
             }
         }
 
-        // ---- 内部処理 ----
 
-        // freeKeys を優先して Key を払い出す. 空の場合は nextFreshKey を進める.
-        private bool TryAllocateKey(out int key)
+        bool TryAllocateKey(out int key)
         {
             if (freeKeys.Count > 0)
             {
@@ -174,7 +130,7 @@ namespace OrdoMemory.Design
             return true;
         }
 
-        private void Store(int key, SampleSchema record)
+        void Store(int key, SampleSchema record)
         {
             var index = (int)((long)key - start);
             record.Id = key;
@@ -183,8 +139,7 @@ namespace OrdoMemory.Design
             Count++;
         }
 
-        // 範囲内かつ使用中のスロットの添字を求める.
-        private bool TryGetAliveIndex(int key, out int index)
+        bool TryGetAliveIndex(int key, out int index)
         {
             // int 同士の減算はオーバーフローし得るため long で計算する.
             var offset = (long)key - start;
@@ -198,9 +153,7 @@ namespace OrdoMemory.Design
             return alive[index];
         }
 
-        // 配列の長さが required 以上になるよう拡張する. 上限を超える場合は何もせず false を返す.
-        // 拡張時は data / alive を再確保するため、data への参照は無効となる.
-        private bool EnsureCapacity(long required)
+        bool EnsureCapacity(long required)
         {
             if (required <= data.Length) return true;
 
@@ -215,10 +168,7 @@ namespace OrdoMemory.Design
             return true;
         }
 
-        // 配列長の上限. 以下の小さいほうとする.
-        // - 配列の最大長
-        // - start + 長さ - 1 が int.MaxValue 以下となる長さ
-        private static int MaxLength(int start)
+        static int MaxLength(int start)
         {
             return (int)Math.Min(MaxArrayLength, (long)int.MaxValue - start + 1);
         }
