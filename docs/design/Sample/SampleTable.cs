@@ -9,31 +9,43 @@ namespace OrdoMemory.Sample
         const int MinGrowLength = 4;
 
         readonly int start;
+        readonly SampleTableOptions options;
 
+        // data / keys / alive は同じ添字で対応する. keys は昇順.
         SampleSchema[] data;
+        int[] keys;
+        bool[] alive;
 
         readonly BPlusTreeIndex<string> nameIndex = new(StringComparer.Ordinal);
 
-        bool[] alive;
-        long nextFreshKey;
+        // 使用中スロット数 (生存 + 削除済み). 次の書き込み先の添字でもある.
+        int used;
+        int deletedCount;
 
-        readonly Stack<int> freeKeys = new();
+        // これまでに削除された Record の累計. コンパクションでもリセットしない.
+        long removedTotal;
 
-        public int Count { get; private set; }
+        // 次に払い出す Key. Key は再利用しない.
+        long nextKey;
+
+        public int Count => used - deletedCount;
 
         public int Capacity => data.Length;
 
-        public SampleTable(int start, int capacity)
+        public SampleTable(int start, int capacity, SampleTableOptions options = null)
         {
             if (capacity < 0 || capacity > MaxLength(start))
             {
                 throw new ArgumentOutOfRangeException(nameof(capacity));
             }
 
+            this.options = options ?? new SampleTableOptions();
+
             this.start = start;
             data = new SampleSchema[capacity];
+            keys = new int[capacity];
             alive = new bool[capacity];
-            nextFreshKey = start;
+            nextKey = start;
         }
 
         // 払い出された Key は record.Id に入る.
@@ -41,9 +53,9 @@ namespace OrdoMemory.Sample
         {
             TableValidation.ThrowIfNull(record, nameof(record));
             if (IsStored(record)) TableValidation.ThrowAlreadyInserted(nameof(record));
-            if (!TryAllocateKey(out var key)) return false;
+            if (!TryReserve(1)) return false;
 
-            Store(key, record);
+            var key = Store(record);
             nameIndex.Insert(record.Name, key);
             return true;
         }
@@ -59,16 +71,12 @@ namespace OrdoMemory.Sample
                 if (IsStored(records[i])) TableValidation.ThrowAlreadyInserted(nameof(records), i);
             }
 
-            // freeKeys で賄えない分だけ、未使用の Key を払い出す.
-            var freshCount = Math.Max(0, records.Count - freeKeys.Count);
-            if (!EnsureCapacity(nextFreshKey - start + freshCount)) return false;
+            if (!TryReserve(records.Count)) return false;
 
             var entries = new KeyValuePair<string, int>[records.Count];
             for (var i = 0; i < records.Count; i++)
             {
-                // 事前に拡張済みのため失敗しない.
-                TryAllocateKey(out var key);
-                Store(key, records[i]);
+                var key = Store(records[i]);
                 entries[i] = new KeyValuePair<string, int>(records[i].Name, key);
             }
 
@@ -96,16 +104,50 @@ namespace OrdoMemory.Sample
             return true;
         }
 
+        // 論理削除. スロットはコンパクションまで残る.
         public bool Remove(int key)
         {
             if (!TryGetAliveIndex(key, out var index)) return false;
 
             nameIndex.Remove(data[index].Name, key);
-            data[index] = null;
             alive[index] = false;
-            freeKeys.Push(key);
-            Count--;
+            deletedCount++;
+            removedTotal++;
+
+            if (ShouldAutoCompact()) Compact();
             return true;
+        }
+
+        // 削除済みスロットを取り除いて前方に詰める. 回収したスロット数を返す.
+        // data への参照は無効となる.
+        public int Compact()
+        {
+            if (deletedCount == 0) return 0;
+
+            var write = 0;
+            for (var read = 0; read < used; read++)
+            {
+                if (!alive[read]) continue;
+
+                if (write != read)
+                {
+                    data[write] = data[read];
+                    keys[write] = keys[read];
+                    alive[write] = true;
+                }
+
+                write++;
+            }
+
+            // 詰めた後の空き領域を初期化する. 削除済み Record への参照も、ここで解放される.
+            Array.Clear(data, write, used - write);
+            Array.Clear(keys, write, used - write);
+            Array.Clear(alive, write, used - write);
+
+            var reclaimed = used - write;
+            used = write;
+            deletedCount = 0;
+            return reclaimed;
         }
 
 
@@ -116,13 +158,8 @@ namespace OrdoMemory.Sample
 
         public IEnumerable<SampleSchema> FindRange(int min, int max)
         {
-            // 未使用の領域 (nextFreshKey 以降) を読まないよう、範囲を使用済みの Key に絞る.
-            var lower = Math.Max((long)min, start);
-            var upper = Math.Min((long)max, nextFreshKey - 1);
-
-            for (var key = lower; key <= upper; key++)
+            for (var index = LowerBound(min); index < used && keys[index] <= max; index++)
             {
-                var index = (int)(key - start);
                 if (alive[index]) yield return data[index];
             }
         }
@@ -146,7 +183,6 @@ namespace OrdoMemory.Sample
 
         public IEnumerable<SampleSchema> All()
         {
-            var used = (int)(nextFreshKey - start);
             for (var index = 0; index < used; index++)
             {
                 if (alive[index]) yield return data[index];
@@ -154,38 +190,41 @@ namespace OrdoMemory.Sample
         }
 
 
-        bool TryAllocateKey(out int key)
+        bool ShouldAutoCompact()
         {
-            if (freeKeys.Count > 0)
-            {
-                key = freeKeys.Pop();
-                return true;
-            }
-
-            if (!EnsureCapacity(nextFreshKey - start + 1))
-            {
-                key = default;
-                return false;
-            }
-
-            key = (int)nextFreshKey;
-            nextFreshKey++;
-            return true;
+            return options.AutoCompaction
+                   && used > 0
+                   && (double)deletedCount / used >= options.CompactionThreshold;
         }
 
-        void Store(int key, SampleSchema record)
+        // count 件分の Key と、書き込み先のスロットを確保する. 確保できない場合は何も変更しない.
+        bool TryReserve(int count)
         {
-            var index = (int)((long)key - start);
+            // Key は再利用しないため、コンパクション後も枯渇は戻らない.
+            if (nextKey + count - 1 > int.MaxValue) return false;
+
+            return EnsureCapacity((long)used + count);
+        }
+
+        // 事前に TryReserve で確保済みであること.
+        int Store(SampleSchema record)
+        {
+            var key = (int)nextKey;
+            nextKey++;
+
             record.Id = key;
-            data[index] = record;
-            alive[index] = true;
-            Count++;
+            data[used] = record;
+            keys[used] = key;
+            alive[used] = true;
+            used++;
+            return key;
         }
 
         // 索引が返す Key は常に使用中のため、生存確認は行わない.
         SampleSchema Resolve(int key)
         {
-            return data[(int)((long)key - start)];
+            TryFindIndex(key, out var index);
+            return data[index];
         }
 
         bool IsStored(SampleSchema record)
@@ -195,16 +234,39 @@ namespace OrdoMemory.Sample
 
         bool TryGetAliveIndex(int key, out int index)
         {
+            return TryFindIndex(key, out index) && alive[index];
+        }
+
+        // keys から Key の添字を引く. 削除済みのスロットも対象とする.
+        bool TryFindIndex(int key, out int index)
+        {
             // int 同士の減算はオーバーフローし得るため long で計算する.
             var offset = (long)key - start;
-            if (offset < 0 || offset >= nextFreshKey - start)
+            if (offset < 0 || offset >= nextKey - start || used == 0)
             {
                 index = -1;
                 return false;
             }
 
-            index = (int)offset;
-            return alive[index];
+            // 欠けている Key は削除済みの分だけなので、添字は [offset - removedTotal, offset] に収まる.
+            var upper = (int)Math.Min(offset, used - 1);
+            var lower = (int)Math.Max(0L, offset - removedTotal);
+            if (lower > upper)
+            {
+                index = -1;
+                return false;
+            }
+
+            var found = Array.BinarySearch(keys, lower, upper - lower + 1, key);
+            index = found >= 0 ? found : -1;
+            return found >= 0;
+        }
+
+        // key 以上の Key を持つ最初の添字. 無ければ used.
+        int LowerBound(int key)
+        {
+            var found = Array.BinarySearch(keys, 0, used, key);
+            return found >= 0 ? found : ~found;
         }
 
         bool EnsureCapacity(long required)
@@ -218,6 +280,7 @@ namespace OrdoMemory.Sample
             var newLength = (int)Math.Min(Math.Max(required, doubled), max);
 
             Array.Resize(ref data, newLength);
+            Array.Resize(ref keys, newLength);
             Array.Resize(ref alive, newLength);
             return true;
         }
