@@ -16,7 +16,8 @@ namespace OrdoMemory.Sample
         int[] keys;
         bool[] alive;
 
-        readonly BPlusTreeIndex<string> nameIndex = new(StringComparer.Ordinal);
+        // Name の索引. 実装は外部から渡す.
+        readonly SecondaryIndex<string> nameIndex;
 
         // 使用中スロット数 (生存 + 削除済み). 次の書き込み先の添字でもある.
         int used;
@@ -32,13 +33,14 @@ namespace OrdoMemory.Sample
 
         public int Capacity => data.Length;
 
-        public SampleTable(int start, int capacity, SampleTableOptions options = null)
+        public SampleTable(int start, int capacity, SecondaryIndex<string> nameIndex, SampleTableOptions options = null)
         {
             if (capacity < 0 || capacity > MaxLength(start))
             {
                 throw new ArgumentOutOfRangeException(nameof(capacity));
             }
 
+            this.nameIndex = nameIndex ?? throw new ArgumentNullException(nameof(nameIndex));
             this.options = options ?? new SampleTableOptions();
 
             this.start = start;
