@@ -3,6 +3,10 @@
 `RuntimeTable.md` (PR #10) に対する改訂案. API の表面 (Insert / BulkInsert / Update / Find / FindRange / FindXxxByYyy / All / Remove) は維持し、内部構造を置き換える.
 対象環境は Unity (netstandard2.1 / C# 9 / Mono・IL2CPP) とする.
 
+> **計測の結果、1 章 (64 件ブロック) は採用しない.** 乱順の削除が遅く、削除が累積した後のメモリも膨らむため.
+> 主キー側は「区画分け rank テーブル」(Key 順が必要な場合) か「世代付きハンドル + sparse set」(不要な場合) とする.
+> 詳細は `RuntimeTable.Benchmark.md`.
+
 ## 0. 要約
 
 | 項目 | 現行案 | 本案 |
