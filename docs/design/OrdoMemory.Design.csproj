@@ -9,6 +9,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Benchmark が、比較用テーブルから SampleSchema.Id を設定するため -->
+    <InternalsVisibleTo Include="RuntimeTableBenchmark" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="MasterMemory" Version="3.0.4" />
     <PackageReference Include="MessagePack" Version="3.1.11" />
   </ItemGroup>

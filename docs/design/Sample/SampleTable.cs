@@ -11,15 +11,12 @@ namespace OrdoMemory.Sample
         readonly int start;
         readonly SampleTableOptions options;
 
-        // data / keys / alive は同じ添字で対応する. keys は昇順.
         SampleSchema[] data;
         int[] keys;
         bool[] alive;
 
-        // Name の索引. 実装は外部から渡す.
         readonly SecondaryIndex<string> nameIndex;
 
-        // 使用中スロット数 (生存 + 削除済み). 次の書き込み先の添字でもある.
         int used;
         int deletedCount;
 
@@ -53,8 +50,8 @@ namespace OrdoMemory.Sample
         // 払い出された Key は record.Id に入る.
         public bool Insert(SampleSchema record)
         {
-            TableValidation.ThrowIfNull(record, nameof(record));
-            if (IsStored(record)) TableValidation.ThrowAlreadyInserted(nameof(record));
+            if (record == null) throw new ArgumentNullException(nameof(record));
+            if (IsStored(record)) throw new ArgumentException("record is already inserted.", nameof(record));
             if (!TryReserve(1)) return false;
 
             var key = Store(record);
@@ -64,13 +61,14 @@ namespace OrdoMemory.Sample
 
         public bool BulkInsert(IReadOnlyList<SampleSchema> records)
         {
-            TableValidation.ThrowIfNull(records, nameof(records));
+            if (records == null) throw new ArgumentNullException(nameof(records));
 
             // Key の払い出しより前に検証する. 途中で失敗して、一部だけ挿入された状態になることを防ぐ.
-            TableValidation.ValidateRecords(records, nameof(records));
+            // 簡易実装のため、同一インスタンスの重複は検出しない.
             for (var i = 0; i < records.Count; i++)
             {
-                if (IsStored(records[i])) TableValidation.ThrowAlreadyInserted(nameof(records), i);
+                if (records[i] == null) throw new ArgumentException($"records[{i}] is null.", nameof(records));
+                if (IsStored(records[i])) throw new ArgumentException($"records[{i}] is already inserted.", nameof(records));
             }
 
             if (!TryReserve(records.Count)) return false;
@@ -120,8 +118,6 @@ namespace OrdoMemory.Sample
             return true;
         }
 
-        // 削除済みスロットを取り除いて前方に詰める. 回収したスロット数を返す.
-        // data への参照は無効となる.
         public int Compact()
         {
             if (deletedCount == 0) return 0;
@@ -141,7 +137,7 @@ namespace OrdoMemory.Sample
                 write++;
             }
 
-            // 詰めた後の空き領域を初期化する. 削除済み Record への参照も、ここで解放される.
+            // 未使用領域の初期化. メモリ確保自体はされたままであり、 data.Length 自体は変化しない
             Array.Clear(data, write, used - write);
             Array.Clear(keys, write, used - write);
             Array.Clear(alive, write, used - write);
@@ -158,12 +154,21 @@ namespace OrdoMemory.Sample
             return TryGetAliveIndex(key, out var index) ? data[index] : null;
         }
 
-        public IEnumerable<SampleSchema> FindRange(int min, int max)
+        // 複数件を返す検索は、results をクリアしてから結果を書き込み、件数を返す.
+        // 呼び出しが返った時点で結果は確定しているため、その後の Insert / Remove / Compact の影響を受けない.
+        // results を使い回せば、アロケーションは発生しない.
+
+        public int FindRange(int min, int max, List<SampleSchema> results)
         {
+            if (results == null) throw new ArgumentNullException(nameof(results));
+
+            results.Clear();
             for (var index = LowerBound(min); index < used && keys[index] <= max; index++)
             {
-                if (alive[index]) yield return data[index];
+                if (alive[index]) results.Add(data[index]);
             }
+
+            return results.Count;
         }
 
         public SampleSchema FindFirstByName(string name)
@@ -173,22 +178,43 @@ namespace OrdoMemory.Sample
             return null;
         }
 
-        public IEnumerable<SampleSchema> FindAllByName(string name)
+        public int FindAllByName(string name, List<SampleSchema> results)
         {
-            foreach (var key in nameIndex.Equal(name)) yield return Resolve(key);
+            if (results == null) throw new ArgumentNullException(nameof(results));
+
+            results.Clear();
+            foreach (var key in nameIndex.Equal(name)) results.Add(Resolve(key));
+
+            return results.Count;
         }
 
-        public IEnumerable<SampleSchema> FindRangeByName(string min, string max)
+        public int FindRangeByName(string min, string max, List<SampleSchema> results)
         {
-            foreach (var key in nameIndex.Range(min, max)) yield return Resolve(key);
+            if (results == null) throw new ArgumentNullException(nameof(results));
+
+            results.Clear();
+            foreach (var key in nameIndex.Range(min, max)) results.Add(Resolve(key));
+
+            return results.Count;
         }
 
-        public IEnumerable<SampleSchema> All()
+        public int All(List<SampleSchema> results)
         {
+            return Where(null, results);
+        }
+
+        // predicate が null の場合は全件を返す. 全件の中間配列は作らず、走査しながら絞り込む.
+        public int Where(Predicate<SampleSchema> predicate, List<SampleSchema> results)
+        {
+            if (results == null) throw new ArgumentNullException(nameof(results));
+
+            results.Clear();
             for (var index = 0; index < used; index++)
             {
-                if (alive[index]) yield return data[index];
+                if (alive[index] && (predicate == null || predicate(data[index]))) results.Add(data[index]);
             }
+
+            return results.Count;
         }
 
 

@@ -148,7 +148,28 @@ MySQL (InnoDB) の二次索引と同様に、非 Unique な SecondaryKey の索�
 | FindFirstByXxx | 非 Unique な SecondaryKey での単一検索   |
 | FindRangeByXxx | SecondaryKey での範囲検索              |
 | All            | 全 Record の取得 (削除済みを除く)          |
+| Where          | 条件に一致する Record の取得 (削除済みを除く)    |
 | Remove         | PrimaryKey に対応する Record の論理削除    |
 | Compact        | 手動コンパクション. 回収したスロット数を返す            |
 
 `Compact` は `AutoCompaction` の設定に関わらず、tombstone が 1 件以上あれば実行する. tombstone が無い場合は何もせず 0 を返す.
+
+### 複数件を返す検索
+
+`FindRange` / `FindAllByXxx` / `FindRangeByXxx` / `All` / `Where` は遅延評価 (`IEnumerable<T>` / `yield`) を行わず、呼び出し側が渡す `List<T>` に結果を書き込む.
+
+```csharp
+int FindRange(Key min, Key max, List<Record> results);
+int Where(Predicate<Record> predicate, List<Record> results);
+```
+
+- `results` は書き込み前にクリアする. 戻り値は書き込んだ件数.
+- 呼び出しが返った時点で結果は確定する. そのため、結果の走査中に Insert / Remove を行っても、配列の拡張やコンパクションの影響を受けない.
+- `results` を使い回せば、アロケーションは発生しない. (`yield` による列挙は、呼び出しのたびに列挙子がヒープに確保される.)
+- `Where` は全件の中間配列を作らず、走査しながら絞り込む. `predicate` が null の場合は `All` と同じ.
+
+#### 遅延評価を採用しない理由
+
+- 列挙中のコンパクション / 配列の拡張で、要素の欠落や重複が起きる. 検出するには列挙子にバージョン番号を持たせる必要がある.
+- Runtime のテーブルは件数が限られ、結果を一括で書き出すコストは小さい.
+- 途中で打ち切りたいケースが必要になった場合は、バージョン番号で変更を検出する struct 列挙子を追加で検討する.
