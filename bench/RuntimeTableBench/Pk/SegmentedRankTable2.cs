@@ -313,7 +313,8 @@ namespace OrdoMemory.Bench.Pk
             }
 
             var s = segHead + segmentCount;
-            segRows[s] = new Row[64];
+            // 末尾の区画は最初から最大長で確保する. 倍々に伸ばすと、そのたびに古い配列がゴミになる.
+            segRows[s] = new Row[MaxRows];
             segUsed[s] = 0;
             segDeleted[s] = 0;
             segmentCount++;

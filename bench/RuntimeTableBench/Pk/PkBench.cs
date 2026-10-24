@@ -159,13 +159,13 @@ namespace OrdoMemory.Bench.Pk
             for (var i = 0; i < lat.Length; i++)
             {
                 var p = rng.Next(n);
-                var c0 = GC.CollectionCount(0);
+                var c0 = GcCount();
                 var t0 = Stopwatch.GetTimestamp();
                 t.Remove(pool[p]);
                 t.Insert(rows[p], out pool[p]);
                 lat[i] = Stopwatch.GetTimestamp() - t0;
                 // GC を挟んだ操作を除いた最大値 (データ構造そのものの遅延).
-                if (GC.CollectionCount(0) == c0 && lat[i] > maxNoGc) maxNoGc = lat[i];
+                if (GcCount() == c0 && lat[i] > maxNoGc) maxNoGc = lat[i];
             }
 
             m["churn max(noGC) us"] = maxNoGc * 1e6 / Stopwatch.Frequency;
@@ -235,12 +235,12 @@ namespace OrdoMemory.Bench.Pk
             var gen2 = GC.CollectionCount(2);
             for (var i = 0; i < ops; i++)
             {
-                var c0 = GC.CollectionCount(0);
+                var c0 = GcCount();
                 var t0 = Stopwatch.GetTimestamp();
                 t.Remove(ring[headIndex]);
                 t.Insert(rows[headIndex], out ring[headIndex]);
                 lat[i] = Stopwatch.GetTimestamp() - t0;
-                if (GC.CollectionCount(0) == c0 && lat[i] > maxNoGc) maxNoGc = lat[i];
+                if (GcCount() == c0 && lat[i] > maxNoGc) maxNoGc = lat[i];
                 headIndex = headIndex + 1 == n ? 0 : headIndex + 1;
             }
 
@@ -388,6 +388,12 @@ namespace OrdoMemory.Bench.Pk
             }
 
             return rows;
+        }
+
+        // Mono ではメジャー GC が gen0 の回数に含まれないことがあるため、全世代の合計で判定する.
+        static int GcCount()
+        {
+            return GC.CollectionCount(0) + GC.CollectionCount(1) + GC.CollectionCount(2);
         }
 
         static double Ns(Stopwatch sw, long ops)
