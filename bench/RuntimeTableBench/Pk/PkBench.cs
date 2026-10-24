@@ -16,8 +16,8 @@ namespace OrdoMemory.Bench.Pk
         public static readonly string[] MetricOrder =
         {
             "insert ns", "mem B/row", "find ns", "update ns",
-            "churn ns", "churn p99.9 ns", "churn max us", "find(churned) ns", "all ns/row", "range64 ns", "mem(churned) B/row",
-            "fifo ns", "fifo max us", "find(fifo) ns",
+            "churn ns", "churn gen0", "churn gen2", "churn p99.9 ns", "churn max us", "churn max(noGC) us", "find(churned) ns", "all ns/row", "range64 ns", "mem(churned) B/row",
+            "fifo ns", "fifo gen2", "fifo max us", "fifo max(noGC) us", "find(fifo) ns",
             "alloc B/query",
         };
 
@@ -29,6 +29,7 @@ namespace OrdoMemory.Bench.Pk
             yield return () => new RankW { T = new RankTable() };
             yield return () => new BlockW { T = new BlockTable() };
             yield return () => new SegmentedRankW { T = new SegmentedRankTable() };
+            yield return () => new SegmentedRank2W { T = new SegmentedRankTable2() };
             yield return () => new SlotMapW { T = new SlotMapTable() };
             yield return () => new DictionaryW { T = new DictionaryTable() };
         }
@@ -80,6 +81,7 @@ namespace OrdoMemory.Bench.Pk
                 case RankW w: return Run(w, n, names, seed);
                 case BlockW w: return Run(w, n, names, seed);
                 case SegmentedRankW w: return Run(w, n, names, seed);
+                case SegmentedRank2W w: return Run(w, n, names, seed);
                 case SlotMapW w: return Run(w, n, names, seed);
                 case DictionaryW w: return Run(w, n, names, seed);
                 default: throw new NotSupportedException();
@@ -95,6 +97,7 @@ namespace OrdoMemory.Bench.Pk
                 case RankW w: return Fifo(w, n, names, seed);
                 case BlockW w: return Fifo(w, n, names, seed);
                 case SegmentedRankW w: return Fifo(w, n, names, seed);
+                case SegmentedRank2W w: return Fifo(w, n, names, seed);
                 case SlotMapW w: return Fifo(w, n, names, seed);
                 case DictionaryW w: return Fifo(w, n, names, seed);
                 default: throw new NotSupportedException();
@@ -136,6 +139,8 @@ namespace OrdoMemory.Bench.Pk
 
             // 乱順の Remove + Insert (削除累計が件数を大きく超える状態を作る)
             var churn = n * 4;
+            var gen0 = GC.CollectionCount(0);
+            var gen2 = GC.CollectionCount(2);
             sw.Restart();
             for (var i = 0; i < churn; i++)
             {
@@ -146,16 +151,24 @@ namespace OrdoMemory.Bench.Pk
 
             sw.Stop();
             m["churn ns"] = Ns(sw, churn);
+            m["churn gen0"] = GC.CollectionCount(0) - gen0;
+            m["churn gen2"] = GC.CollectionCount(2) - gen2;
 
             // 1 操作ごとの遅延 (コンパクションのスパイク)
+            long maxNoGc = 0;
             for (var i = 0; i < lat.Length; i++)
             {
                 var p = rng.Next(n);
+                var c0 = GC.CollectionCount(0);
                 var t0 = Stopwatch.GetTimestamp();
                 t.Remove(pool[p]);
                 t.Insert(rows[p], out pool[p]);
                 lat[i] = Stopwatch.GetTimestamp() - t0;
+                // GC を挟んだ操作を除いた最大値 (データ構造そのものの遅延).
+                if (GC.CollectionCount(0) == c0 && lat[i] > maxNoGc) maxNoGc = lat[i];
             }
+
+            m["churn max(noGC) us"] = maxNoGc * 1e6 / Stopwatch.Frequency;
 
             Array.Sort(lat);
             m["churn p99.9 ns"] = lat[(int)(lat.Length * 0.999)] * 1e9 / Stopwatch.Frequency;
@@ -218,14 +231,21 @@ namespace OrdoMemory.Bench.Pk
             var ops = n * 4;
             var lat = new long[ops];
             var headIndex = 0;
+            long maxNoGc = 0;
+            var gen2 = GC.CollectionCount(2);
             for (var i = 0; i < ops; i++)
             {
+                var c0 = GC.CollectionCount(0);
                 var t0 = Stopwatch.GetTimestamp();
                 t.Remove(ring[headIndex]);
                 t.Insert(rows[headIndex], out ring[headIndex]);
                 lat[i] = Stopwatch.GetTimestamp() - t0;
+                if (GC.CollectionCount(0) == c0 && lat[i] > maxNoGc) maxNoGc = lat[i];
                 headIndex = headIndex + 1 == n ? 0 : headIndex + 1;
             }
+
+            m["fifo gen2"] = GC.CollectionCount(2) - gen2;
+            m["fifo max(noGC) us"] = maxNoGc * 1e6 / Stopwatch.Frequency;
 
             m["fifo ns"] = lat.Average() * 1e9 / Stopwatch.Frequency;
             m["fifo max us"] = lat.Max() * 1e6 / Stopwatch.Frequency;
