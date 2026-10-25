@@ -138,7 +138,9 @@ Mono でも順位は同じ (Mono の SortedSet は削除+挿入で最大 200ms �
 | `FindRange(PK)` と Key 順の `All` が**必要** | **G: 区画分け rank テーブル** |
 | **不要** | **D: 世代付きハンドル + sparse set** |
 
-現行案 (A) と設計案の初版 (C) は、どちらの場合も採用しない. `RuntimeTable.Proposal.md` の 1 章 (64 件ブロック) は G に置き換える.
+現行案 (A) と設計案の初版 (C) は、どちらの場合も採用しない.
+
+**決定: PK による範囲検索は不要 (All は必要だが順序は問わない) のため、D を採用する.** 設計は `RuntimeTable.Proposal.md`.
 
 ### 二次索引
 
