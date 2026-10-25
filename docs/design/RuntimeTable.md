@@ -1,154 +1,314 @@
 # Runtimeテーブル設計
 
+ゲーム実行中に Insert / Update / Remove が繰り返されるテーブルの設計. 対象環境は Unity (netstandard2.1 / C# 9 / Mono・IL2CPP).
+メモリ効率とパフォーマンスを最優先とする. 構造の選定根拠は `RuntimeTable.Benchmark.md`、サンプル実装は `Sample/`.
+
+## 要件
+
+- PK による範囲検索は持たない.
+- `All` は持つが、順序は保証しない.
+- SecondaryKey による検索 (Unique / 非 Unique / 範囲) を持つ.
+- 検索でアロケーションを発生させない.
+- 1 回の操作の停止時間に上限があること (コンパクションのような O(n) の処理を持たない).
+
+## 概要
+
+| 項目 | 方式 |
+|------|------|
+| Record の保持 | 生成した struct を隙間無く並べた配列 (dense) |
+| PK | 世代付きハンドル (スロット番号 + 世代) |
+| PK → Record | スロット表を 1 回引く. O(1) |
+| 削除 | 末尾の Record を空いた位置へ移す. O(1). tombstone もコンパクションも無い |
+| 二次索引 | 用途で選ぶ: アリーナ B+Tree / Hash / Bitmap |
+| 列挙 | struct 列挙子. ゼロアロケーション |
+
+ECS (EnTT, Unity Entities 等) で使われている「世代付きハンドル + sparse set」の構成である.
+
+---
+
 ## データ構造
 
-Key は再利用せず単調増加で払い出す. Remove は論理削除（フラグ）とし, 空きスロットはコンパクションで回収する.
-検索は `keys` に対する二分探索とするが, 探索範囲を後述の方法で絞るため、実質的にはほぼ直接引きとなる.
+```csharp
+// 生存している Record だけを隙間無く並べる. All はこれを先頭から読むだけ.
+Row[] dense;
+
+// dense[i] を指しているスロット. Remove で末尾を移すときに使う.
+int[] denseToSlot;
+
+// 生存件数. 次の書き込み先の添字でもある.
+int count;
+
+// スロット番号 → dense の位置. ハンドルの下位ビットがスロット番号.
+struct Slot
+{
+    public int Dense;  // 使用中: dense の位置 / 空き: 次の空きスロット (空きリスト)
+    public int Gen;    // 世代. スロットを再利用するたびに進める
+}
+Slot[] slots;
+
+// 使ったことのあるスロットの数.
+int slotCount;
+
+// 空きスロットのリストの先頭. 無ければ -1.
+int freeHead;
+```
+
+- `Slot` は 1 つの struct にまとめ、Find で触るキャッシュラインを 1 本にする.
+- Record (Row) は PK を持たない. PK が必要な場合は、列挙子の `CurrentPk` か `denseToSlot` と `slots` から求める.
+
+### Record
+
+- スキーマから struct を生成し、テーブルが唯一の実体を持つ.
+  - Record ごとのオブジェクトヘッダと参照が無くなり、GC が管理するオブジェクトも配列数本だけになる.
+  - 値で受け取るため、同じインスタンスを二重に Insert するという問題が起こり得ない.
+- メンバには `readonly` を付ける. `ref readonly` / `in` で受け取ったときの隠れたコピー (defensive copy) を防ぐため.
+- 書き換えは Update 経由のみとする. 索引との食い違いを防ぐため.
+- 生成時にフィールドをサイズの降順に並べ、パディングを減らす.
+
+---
+
+## 主キー (ハンドル)
+
+PK は DB 側で払い出す.
+
+```
+PK = (Gen << SlotBits) | Slot
+```
+
+### 対応する型
+
+| PK の型 | スロット | 世代 | 同時に持てる件数 | 同じスロットの再利用回数 |
+|---|---|---|---|---|
+| int (既定) | 22 bit | 9 bit | 約 419 万 | 512 回 |
+| long | 32 bit | 31 bit | 約 21 億 | 約 21 億回 |
+
+- ビットの配分は生成時に決める.
+- PK は Record の識別子であり、大小関係に意味は無い. Key 順・挿入順を前提とした API は持たない.
+
+### 世代の一周
+
+- 世代が最大値に達したスロットは、空きリストに戻さず使用を止める.
+  - 古いハンドルが、同じスロットを再利用した別の Record を指す事故 (ABA) を防ぐため.
+  - 使用を止めたスロットは 1 つにつき 8B を消費し続ける.
+- スロットを使い切った場合、Insert を失敗させる.
+
+---
+
+## 操作
+
+### Find (PK から Record の解決)
 
 ```csharp
-// 実データ. Key の昇順に並ぶ.
-Record[] data;
-
-// data と同じ添字の Key. 昇順. 二分探索の対象.
-Key[] keys;
-
-// スロットの使用状況. false は削除済み (tombstone). All / FindRange で読み飛ばす.
-bool[] alive;
-
-// 使用中スロット数 (alive / tombstone の合計). 次の書き込み先の添字でもある.
-int used;
-
-// tombstone の数.
-int deletedCount;
-
-// これまでに削除された Record の累計 (コンパクション済みの分を含む). 探索範囲の絞り込みに使う.
-long removedTotal;
-
-// 次に払い出す Key. この Key 以降は一度も使われていない.
-Key nextKey;
+var slot = pk & SlotMask;
+if ((uint)slot >= (uint)slotCount) return miss;
+ref var s = ref slots[slot];
+if (s.Gen != pk >> SlotBits) return miss;    // 削除済み / 再利用済み
+return ref dense[s.Dense];
 ```
 
-### 主キー
+- 空きスロットの `Gen` は Remove の時点で進めてあるため、削除済みの PK は世代の比較で弾かれる.
 
-Runtime の DB であるため、主キーは DB 側で生成、割り当てるものとする.
+### Insert
 
-- Insert 時は `nextKey` を払い出し、`nextKey` を進める.
-- 削除された Key は再利用しない. Key は常に単調増加する.
-- 払い出した Key は `data` の末尾 (`used` 番目) に追記する. Key が昇順に並ぶため、Insert 時に Sort をし直す必要は無い.
-- 構築コストは `capacity` に依存しない.
+1. 空きリストの先頭からスロットを取る. 無ければ `slotCount` 番目を新しく使う.
+   - 直前に空いたスロットから使うため、キャッシュに乗っていることが多い.
+2. `dense[count]` に書き込み、`denseToSlot[count] = slot`、`slots[slot].Dense = count` とする.
+3. PK = `(Gen << SlotBits) | slot` を返す.
 
-#### 対応する型
+### BulkInsert
 
-- 主キーの型は `short` / `int` / `long` とする.
-- Key は開始値 `start` から連番で払い出す.
+- 払い出す PK は連続しないため、PK を書き込む出力先 (Span) を引数で受け取る.
+- `dense` / `denseToSlot` / `slots` を必要な件数分まとめて拡張してから書き込む.
+- 上限を超える場合は何も挿入せずに失敗する.
 
-#### Key の枯渇
+### Update
 
-Key は再利用しないため、`nextKey` が Key 型の最大値を超える場合は Insert を失敗させる.
-コンパクションを行っても Key は回収されない.
+- 指定した項目だけを更新する (`Optional<T>`). アロケーションは発生しない.
+- SecondaryKey が変わらない場合は索引を更新しない. 変わる場合は、変更前の値で索引から削除し、変更後の値で挿入する.
 
-### 検索 (Key から添字の解決)
+### Remove
 
-`keys` は昇順で、`start` から連番で払い出した Key のうち削除されたものだけが欠けている.
-そのため、Key の添字は次の範囲に収まる.
+1. Find と同様にスロットを確認する. 存在しない / 削除済みの場合は失敗とする.
+2. 対応する二次索引のエントリを削除する.
+3. 末尾の Record (`dense[count - 1]`) を `dense[s.Dense]` に移し、移した Record のスロットの `Dense` を書き換える.
+4. 末尾を `default` で消す (Record が持つ参照を GC に解放させるため).
+5. スロットの世代を進めて空きリストへ戻す (一周した場合は戻さない).
 
-- 上限: `key - start`
-- 下限: `max(0, key - start - removedTotal)`
+### All
 
-この範囲 `[下限, min(上限, used - 1)]` に対して二分探索を行う.
-削除が無ければ範囲は 1 点になり、直接引きと同じコストになる.
-見つかった添字の `alive` が false の場合は、存在しないものとして扱う.
+- `dense[0 .. count)` を先頭から読む. 順序は保証しない (Remove のたびに変わる).
 
-### 削除 (論理削除)
+---
 
-Remove は次の処理を行う.
+## 容量と参照の有効期間
 
-1. Key から添字を解決する. 存在しない / 削除済みの場合は失敗とする.
-2. `alive[index]` を false にし、`deletedCount` と `removedTotal` を加算する.
-3. 対応する二次索引のエントリを削除する (削除済みの Record が索引から返らないようにするため).
-4. 自動コンパクションが有効な場合、閾値を確認する (後述).
+- 初期容量は構築時に指定する. `count` が容量に達した場合、配列を倍に拡張する.
+- `TrimExcess` で余った容量を返す.
+- 次の操作の後は、`ref readonly` で受け取った参照を取り直す.
+  - Remove: 末尾の Record が移動するため.
+  - Insert / BulkInsert: 配列の拡張で再確保されるため.
+- 列挙中の Insert / Remove は `version` で検出し、例外とする.
 
-`data[index]` の中身は、コンパクションまでそのまま残す.
-Find / Update / 二次索引経由の検索は、`alive` が false のスロットを存在しないものとして扱う.
-
-### 容量と配列の拡張
-
-- 初期 `capacity` は構築時に指定する.
-- Insert / BulkInsert で `used` が `capacity` に達している場合、`data` / `keys` / `alive` を拡張する.
-- Key が枯渇する場合は Insert を失敗させる.
-- 拡張時は各配列を再確保するため、`data` への参照（ref return / Span）は拡張後に無効となる.
-- BulkInsert は、必要な件数分を事前に拡張してから挿入する. 上限を超える場合は何も挿入せずに失敗する.
-
-## コンパクション
-
-tombstone を取り除き、`data` / `keys` / `alive` を前方に詰める.
-
-- 生存している Record の相対順序（= Key の昇順）は保つ.
-- 詰めた後、`used` を生存数に更新し、`deletedCount` を 0 にする. `removedTotal` はリセットしない.
-- `capacity` は縮小しない.
-- 二次索引が保持するのは PrimaryKey であり、Key はコンパクションで変化しないため、索引の再構築は不要.
-- `data` への参照（ref return / Span）はコンパクション後に無効となる.
-- 計算量は `O(used)`.
-
-### 自動コンパクション
-
-Remove の後に、次の条件を満たした場合にコンパクションを実行する.
-
-```
-deletedCount / used >= CompactionThreshold
-```
-
-- Insert / Update では自動コンパクションを行わない. 参照を無効化するタイミングを Remove に限定するため.
-- BulkRemove のような一括削除を設ける場合は、一括処理の完了後に 1 度だけ判定する.
-
-### 設定
-
-構築時にオプションで指定する.
-
-| Name                  | Type     | Default | Description                                         |
-|-----------------------|----------|---------|-----------------------------------------------------|
-| AutoCompaction        | bool     | true    | false の場合、自動コンパクションを行わない                         |
-| CompactionThreshold   | double   | 0.3     | 自動コンパクションの閾値. 使用中スロットのうち tombstone が占める割合 (N割 = N / 10) |
-
-- `CompactionThreshold` は `0 < 値 <= 1` とする. 範囲外の場合は構築時に例外とする.
-- `AutoCompaction` が false の場合、`CompactionThreshold` は参照されない.
-- 自動コンパクションを無効にした場合でも、手動コンパクション (`Compact`) は利用できる.
+---
 
 ## インデックス構造
 
-PrimaryKey は `keys` の二分探索で引くため、専用の索引を持たない. SecondaryKey の索引には B+Tree を使用する.
+索引の値は PK (ハンドル) とする. PK → Record は Find と同じく O(1).
+SecondaryKey ごとに、属性で種類を選ぶ.
 
-- SecondaryKey ごとに B+Tree を 1 本持つ.
+| 種類 | 向くもの | 構造 | 範囲検索 |
+|---|---|---|---|
+| `Ordered` (既定) | 一般 | アリーナ B+Tree, B = 64 | 可 |
+| `Hash` | 等価検索のみ | `Dictionary<TKey, ...>` | 不可 |
+| `Bitmap` | 値の種類が少ないもの (enum, 種別等) | 値ごとのスロット番号のビットマップ | 可 (値の範囲) |
+
+### Ordered: アリーナ B+Tree
+
+- ノードはオブジェクトにせず、葉と内部ノードをそれぞれ数本の配列に置いて `int` の番号で指す.
+  - 子への参照が 4B になり、参照を辿る回数とGC が走査するオブジェクトが減る.
 - 葉ノードは SecondaryKey の昇順で連結し、`FindRangeByXxx` は葉を辿って範囲を取得する.
-- 索引が保持する値は Record の PrimaryKey とする. Record 本体は `keys` で添字を解決して `data` から引く.
-  - Record の SecondaryKey が変わらない Update では、索引を更新しない.
-- Insert / Update / Remove の際に、対応する索引を同期して更新する.
-- BulkInsert は 一括構築する
+- 内部ノードの各エントリは (子の最小キー, 子) とする.
+- キーを `ulong` に正規化して比較する.
 
-### 非 Unique な SecondaryKey
+| SecondaryKey の型 | 正規化キー |
+|---|---|
+| int / short / enum | 符号ビットを反転した値. 非 Unique は `(反転した値 << 32) \| PK` とし、組の比較を ulong 1 回にする |
+| long / double | 順序を保つ変換 (double は符号に応じてビット反転). 非 Unique は PK を別に持つ |
+| string | 先頭 4 文字 (UTF-16) を詰めた値. 等しいときだけ `string.CompareOrdinal` を呼ぶ |
 
-MySQL (InnoDB) の二次索引と同様に、非 Unique な SecondaryKey の索引では、B+Tree のキーを `(SecondaryKey, PrimaryKey)` の組とする.
+- 削除では併合 (merge-at-half) をせず、空になったノードだけを解放する (free-at-empty).
+- 一括挿入は、件数が既存に比べて少なければ 1 件ずつ挿入し、多ければ整列して下から作り直す (目安: k < n / 16 なら 1 件ずつ).
+
+#### 非 Unique な SecondaryKey
+
+MySQL (InnoDB) の二次索引と同様に、B+Tree のキーを `(SecondaryKey, PK)` の組とする.
 
 - 組で比較するため、SecondaryKey が重複していても索引のキーは一意になる.
-- 同じ SecondaryKey を持つ Record は、葉ノード上で PrimaryKey の昇順に連続して並ぶ.
-- 特定の SecondaryKey の検索は、`(SecondaryKey, PrimaryKey の最小値)` から `(SecondaryKey, PrimaryKey の最大値)` までの範囲検索として扱う.
+- 特定の SecondaryKey の検索は、`(SecondaryKey, PK の最小値)` から `(SecondaryKey, PK の最大値)` までの範囲検索として扱う.
 - Unique な SecondaryKey の索引は、SecondaryKey のみをキーとする.
+
+### Hash
+
+- Unique: `Dictionary<TKey, int>`.
+- 非 Unique: 値ごとに PK の配列を持つ. PK は単調増加しないため配列は順序を持たず、削除は末尾との入れ替えとする.
+
+### Bitmap
+
+- 値ごとに、スロット番号のビットマップを持つ. スロット数には上限があるため、ビットマップの大きさにも上限がある.
+- 列挙で得たスロット番号に `slots` の世代を付けて PK に戻す.
+- 走査は結果の件数ではなくスロット数に比例する. 1 つの値に多くの件数が集まるキーにのみ使う.
+
+---
 
 ## API
 
-| Name           | Description                      |
-|----------------|----------------------------------|
-| Insert         | 新規 Record の挿入                    |
-| BulkInsert     | 新規 Record の一括挿入                  |
-| Update         | 既存 Record の更新                    |
-| Find           | PrimaryKey での単一検索                |
-| FindRange      | PrimaryKey での範囲検索                |
-| FindByXxx      | Unique な SecondaryKey での単一検索     |
-| FindAllByXxx   | 非 Unique な SecondaryKey での単一範囲検索  |
-| FindFirstByXxx | 非 Unique な SecondaryKey での単一検索   |
-| FindRangeByXxx | SecondaryKey での範囲検索              |
-| All            | 全 Record の取得 (削除済みを除く)          |
-| Remove         | PrimaryKey に対応する Record の論理削除    |
-| Compact        | 手動コンパクション. 回収したスロット数を返す            |
+| Name           | Description                               |
+|----------------|-------------------------------------------|
+| Insert         | 新規 Record の挿入. 払い出した PK を返す        |
+| BulkInsert     | 新規 Record の一括挿入. PK は出力先の Span に書く |
+| Update         | 既存 Record の部分更新                        |
+| Find           | PK での単一検索 (`TryFind` / `FindRef`)        |
+| FindByXxx      | Unique な SecondaryKey での単一検索            |
+| FindAllByXxx   | 非 Unique な SecondaryKey での検索              |
+| FindFirstByXxx | 非 Unique な SecondaryKey での単一検索 (索引上の先頭) |
+| FindRangeByXxx | SecondaryKey での範囲検索 (`Ordered` / `Bitmap` のみ) |
+| All            | 全 Record の取得. 順序は保証しない              |
+| Remove         | PK に対応する Record の削除                    |
+| TrimExcess     | 余った容量を返す                              |
 
-`Compact` は `AutoCompaction` の設定に関わらず、tombstone が 1 件以上あれば実行する. tombstone が無い場合は何もせず 0 を返す.
+```csharp
+public sealed class SampleTable
+{
+    public bool TryInsert(in SampleRow row, out int pk);
+    public bool TryBulkInsert(ReadOnlySpan<SampleRow> rows, Span<int> pks);
+
+    public bool TryFind(int pk, out SampleRow row);
+    public ref readonly SampleRow FindRef(int pk, out bool found);
+
+    public bool Update(int pk, Optional<string> name = default, Optional<string> description = default);
+    public bool Remove(int pk);
+
+    public AllEnumerable All();
+    public bool TryFindFirstByName(string name, out SampleRow row);
+    public NameEnumerable FindAllByName(string name);
+    public NameEnumerable FindRangeByName(string min, string max);
+
+    public void TrimExcess();
+}
+```
+
+- 列挙は struct で返す (`foreach (ref readonly var row in table.All())`).
+- 比較子は struct をジェネリクスで受けるか、生成コードに埋め込む (仮想呼び出しを避けるため).
+- 単一スレッド前提とする.
+
+---
+
+## 計算量
+
+記号: n = テーブルの件数, m = 返す件数, k = BulkInsert の件数, I = テーブルの二次索引の数, d = Bitmap 索引の値の種類数, S = スロット数 (同時に存在した件数の最大), v = 範囲に含まれる値の数.
+
+### テーブル
+
+| API | 計算量 | 補足 |
+|---|---|---|
+| Find | **O(1)** (最悪) | スロット表を 1 回引いて世代を比べるだけ. ハッシュではないため衝突による悪化も無い |
+| Insert | **O(1) 償却** + 索引への挿入 × I | 配列の拡張時のみ O(n). 初期容量を指定すれば最悪 O(1) |
+| BulkInsert | **O(k) 償却** + 索引への一括挿入 × I | 配列の拡張は事前に 1 回 |
+| Update | **O(1)** + SecondaryKey が変わった索引ごとに削除 + 挿入 | SecondaryKey が変わらなければ O(1) |
+| Remove | **O(1)** + 索引からの削除 × I | 末尾の Record を移すだけ |
+| All | **O(n)** | n は生存件数. 削除の履歴に依らない |
+| TrimExcess | O(n) + 索引の作り直し | |
+
+### 二次索引
+
+| 操作 | Ordered (B+Tree) | Hash | Bitmap |
+|---|---|---|---|
+| 索引への挿入 | O(log n) | 平均 O(1) | O(log d) |
+| 索引からの削除 | O(log n) | 平均 O(1) ※1 | O(log d) |
+| FindByXxx (Unique) | O(log n) | 平均 O(1) | ― |
+| FindFirstByXxx | O(log n) | 平均 O(1) | O(log d + S/64) ※2 |
+| FindAllByXxx | O(log n + m) | 平均 O(1 + m) | O(log d + S/64) ※2 |
+| FindRangeByXxx | O(log n + m) | 不可 | O(log d + v·S/64) ※2 |
+| 一括挿入 (k 件) | O(k log(n+k)), 作り直す場合 O((n+k) + k log k) | 平均 O(k) | O(k log d) |
+
+- Ordered: ノードの大きさ B は定数 (64). 高さ log_B n, ノード内の探索とずらしが O(B) で、合わせて O(log n). ノードの分割は償却 O(1).
+- Hash: 最悪は衝突が偏った場合の O(n).
+- ※1 非 Unique の Hash 索引では、値ごとの PK 配列の中での位置を別に持てば O(1). 持たずに探す場合は、その値の件数 p に対して O(p).
+- ※2 Bitmap は 64 件ずつまとめて読むため S/64.
+
+---
+
+## メモリ
+
+| 項目 | 1 件あたり |
+|---|---|
+| Row | Record の大きさ (SampleRow なら 16B, ベンチマークの Row なら 32B) |
+| `denseToSlot` | 4B |
+| `slots` | 8B |
+| **合計** | **Row + 12B** + 配列の余り |
+
+二次索引は 1 件あたり、Ordered (int キー) で約 18B, Bitmap で約 3B (ベンチマークの値).
+
+---
+
+## 未決事項
+
+1. 非 Unique の Hash 索引で、PK 配列の中での位置を持つか (削除 O(1) とメモリの交換).
+2. アリーナ B+Tree のメモリ対策. string キーでは class ノード版の約 2 倍 (44 vs 23 B/件) のため、配列をチャンク単位で伸ばす方式と、string で正規化キーを持たない方式を比べる.
+3. 二次索引の再計測. ベンチマークは PK が単調増加する前提で測っているため、ハンドル (単調増加しない) で測り直す.
+4. Unity の IL2CPP と Mono (Boehm GC) での計測.
+
+---
+
+## 参考文献
+
+- EnTT (sparse set による ECS) — https://github.com/skypjack/entt
+- EnTT Discussion #761 (世代の一周による誤判定の懸念) — https://github.com/skypjack/entt/discussions/761
+- Unity Entities, *Archetypes / Chunks* — https://docs.unity3d.com/Packages/com.unity.entities@1.4/manual/concepts-archetypes.html
+- P. Khuong, P. Morin, *Array Layouts for Comparison-Based Searching* — https://arxiv.org/abs/1509.05053
+- J. Rao, K. A. Ross, *Making B+-Trees Cache Conscious in Main Memory*, SIGMOD 2000
+- Abseil, *B-tree Ordered Containers* — https://abseil.io/blog/20190812-btree
+- G. Graefe, *Modern B-Tree Techniques*, 2011 — https://nowpublishers.com/article/Details/DBS-028
+- T. Johnson, D. Shasha, *B-trees with inserts and deletes: why free-at-empty is better than merge-at-half*, JCSS 1993
+- S. Chambi, D. Lemire et al., *Better bitmap performance with Roaring bitmaps* — https://arxiv.org/abs/1402.6407
+- Abseil, *Swiss Tables Design Notes* — https://abseil.io/about/design/swisstables

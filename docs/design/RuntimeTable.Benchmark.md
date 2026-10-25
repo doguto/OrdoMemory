@@ -1,6 +1,6 @@
 # Runtimeテーブル データ構造の比較結果
 
-`RuntimeTable.Proposal.md` の候補と、その他の既知の構造を同じ条件で実装・計測し、採用する構造を決める.
+Runtimeテーブル (`RuntimeTable.md`) のデータ構造の候補を同じ条件で実装・計測し、採用する構造を決める.
 コードと再現手順は `bench/RuntimeTableBench/`. 生の結果 (全指標) は `bench/RuntimeTableBench/results/`.
 
 ## 条件
@@ -140,7 +140,7 @@ Mono でも順位は同じ (Mono の SortedSet は削除+挿入で最大 200ms �
 
 現行案 (A) と設計案の初版 (C) は、どちらの場合も採用しない.
 
-**決定: PK による範囲検索は不要 (All は必要だが順序は問わない) のため、D を採用する.** 設計は `RuntimeTable.Proposal.md`.
+**決定: PK による範囲検索は不要 (All は必要だが順序は問わない) のため、D を採用する.** 設計は `RuntimeTable.md`.
 
 ### 二次索引
 
