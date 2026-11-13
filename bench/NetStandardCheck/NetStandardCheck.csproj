@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- ベンチマークのデータ構造が Unity と同じ条件 (netstandard2.1 / C# 9) でコンパイルできることを確認する. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../RuntimeTableBench/**/*.cs" Exclude="../RuntimeTableBench/Program.cs;../RuntimeTableBench/obj/**;../RuntimeTableBench/bin/**" />
+  </ItemGroup>
+
+</Project>
