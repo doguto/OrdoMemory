@@ -4,7 +4,7 @@ namespace OrdoMemory.Sample
 {
     /// <summary>
     /// SecondaryKey の索引の契約. このサンプルでは契約のみを定義する.
-    /// 実装 (生成コード) では、種類 (Ordered / Hash / Bitmap) ごとの具象型と struct の列挙子を使い、
+    /// 実装 (生成コード) では、種類 (Ordered / Hash) ごとの具象型と struct の列挙子を使い、
     /// 仮想呼び出しと列挙のアロケーションを無くす.
     /// 非 Unique の索引のキーは (SecondaryKey, PK) の組とし、SecondaryKey が重複しても組としては一意になる.
     /// 索引が保持する値は Record の PK (ハンドル) のみ.

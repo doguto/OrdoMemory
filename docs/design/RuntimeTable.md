@@ -19,7 +19,7 @@
 | PK | 世代付きハンドル (スロット番号 + 世代) |
 | PK → Record | スロット表を 1 回引く. O(1) |
 | 削除 | 末尾の Record を空いた位置へ移す. O(1). tombstone もコンパクションも無い |
-| 二次索引 | 用途で選ぶ: アリーナ B+Tree / Hash / Bitmap |
+| 二次索引 | 用途で選ぶ: アリーナ B+Tree / Hash |
 | 列挙 | struct 列挙子. ゼロアロケーション |
 
 ECS (EnTT, Unity Entities 等) で使われている「世代付きハンドル + sparse set」の構成である.
@@ -167,9 +167,11 @@ SecondaryKey ごとに、属性で種類を選ぶ.
 
 | 種類 | 向くもの | 構造 | 範囲検索 |
 |---|---|---|---|
-| `Ordered` (既定) | 一般 | アリーナ B+Tree, B = 64 | 可 |
-| `Hash` | 等価検索のみ | `Dictionary<TKey, ...>` | 不可 |
-| `Bitmap` | 値の種類が少ないもの (enum, 種別等) | 値ごとのスロット番号のビットマップ | 可 (値の範囲) |
+| `Ordered` (既定) | 一般. 範囲検索・キー順の列挙が要るもの | アリーナ B+Tree, B = 64 | 可 |
+| `Hash` | 完全一致でしか引かないもの (名前, コード等) | `Dictionary<TKey, ...>` | 不可 |
+
+- 既定を `Ordered` とするのは、後から範囲検索が必要になっても索引を作り直さずに済むため.
+- 等価検索しか行わないと分かっているキーにのみ `Hash` を指定する. 等価検索が O(log n) から平均 O(1) になる.
 
 ### Ordered: アリーナ B+Tree
 
@@ -201,11 +203,14 @@ MySQL (InnoDB) の二次索引と同様に、B+Tree のキーを `(SecondaryKey,
 - Unique: `Dictionary<TKey, uint>`.
 - 非 Unique: 値ごとに PK の配列を持つ. PK は単調増加しないため配列は順序を持たず、削除は末尾との入れ替えとする.
 
-### Bitmap
+### 将来の候補: Bitmap
 
-- 値ごとに、スロット番号のビットマップを持つ. スロット数には上限があるため、ビットマップの大きさにも上限がある.
-- 列挙で得たスロット番号に `slots` の世代を付けて PK に戻す.
-- 走査は結果の件数ではなくスロット数に比例する. 1 つの値に多くの件数が集まるキーにのみ使う.
+当初は持たない. 値の種類が少なく 1 つの値に大量の件数が集まるキー (enum, 種別, 状態フラグ等) の絞り込みが、計測でボトルネックと分かった場合に追加を検討する.
+
+- 値ごとに、スロット番号のビットマップを持つ. 列挙で得たスロット番号に `slots` の世代を付けて PK に戻す.
+- 64 スロットを 1 語でまとめて読めるため、ヒット件数が多いほど B+Tree より有利になる.
+- 走査は結果の件数ではなくスロット数に比例するため、ヒットが少ない場合は不利になる.
+- 見送る理由: 少数値のキーは非 Unique の Hash でも走査がヒット件数に比例し、実用上の差が出る規模が限られるため. 索引の種類を増やすと、生成コード・テスト・選択基準が増える.
 
 ---
 
@@ -220,7 +225,7 @@ MySQL (InnoDB) の二次索引と同様に、B+Tree のキーを `(SecondaryKey,
 | FindByXxx      | Unique な SecondaryKey での単一検索            |
 | FindAllByXxx   | 非 Unique な SecondaryKey での検索              |
 | FindFirstByXxx | 非 Unique な SecondaryKey での単一検索 (索引上の先頭) |
-| FindRangeByXxx | SecondaryKey での範囲検索 (`Ordered` / `Bitmap` のみ) |
+| FindRangeByXxx | SecondaryKey での範囲検索 (`Ordered` のみ) |
 | All            | 全 Record の取得. 順序は保証しない              |
 | Remove         | PK に対応する Record の削除                    |
 | TrimExcess     | 余った容量を返す                              |
@@ -256,7 +261,7 @@ public sealed class SampleTable
 
 ## 計算量
 
-記号: n = テーブルの件数, m = 返す件数, k = BulkInsert の件数, I = テーブルの二次索引の数, d = Bitmap 索引の値の種類数, S = スロット数 (同時に存在した件数の最大), v = 範囲に含まれる値の数.
+記号: n = テーブルの件数, m = 返す件数, k = BulkInsert の件数, I = テーブルの二次索引の数.
 
 ### テーブル
 
@@ -272,20 +277,19 @@ public sealed class SampleTable
 
 ### 二次索引
 
-| 操作 | Ordered (B+Tree) | Hash | Bitmap |
-|---|---|---|---|
-| 索引への挿入 | O(log n) | 平均 O(1) | O(log d) |
-| 索引からの削除 | O(log n) | 平均 O(1) ※1 | O(log d) |
-| FindByXxx (Unique) | O(log n) | 平均 O(1) | ― |
-| FindFirstByXxx | O(log n) | 平均 O(1) | O(log d + S/64) ※2 |
-| FindAllByXxx | O(log n + m) | 平均 O(1 + m) | O(log d + S/64) ※2 |
-| FindRangeByXxx | O(log n + m) | 不可 | O(log d + v·S/64) ※2 |
-| 一括挿入 (k 件) | O(k log(n+k)), 作り直す場合 O((n+k) + k log k) | 平均 O(k) | O(k log d) |
+| 操作 | Ordered (B+Tree) | Hash |
+|---|---|---|
+| 索引への挿入 | O(log n) | 平均 O(1) |
+| 索引からの削除 | O(log n) | 平均 O(1) ※1 |
+| FindByXxx (Unique) | O(log n) | 平均 O(1) |
+| FindFirstByXxx | O(log n) | 平均 O(1) |
+| FindAllByXxx | O(log n + m) | 平均 O(1 + m) |
+| FindRangeByXxx | O(log n + m) | 不可 |
+| 一括挿入 (k 件) | O(k log(n+k)), 作り直す場合 O((n+k) + k log k) | 平均 O(k) |
 
 - Ordered: ノードの大きさ B は定数 (64). 高さ log_B n, ノード内の探索とずらしが O(B) で、合わせて O(log n). ノードの分割は償却 O(1).
 - Hash: 最悪は衝突が偏った場合の O(n).
 - ※1 非 Unique の Hash 索引では、値ごとの PK 配列の中での位置を別に持てば O(1). 持たずに探す場合は、その値の件数 p に対して O(p).
-- ※2 Bitmap は 64 件ずつまとめて読むため S/64.
 
 ---
 
@@ -298,7 +302,7 @@ public sealed class SampleTable
 | `slots` | 8B |
 | **合計** | **Row + 12B** + 配列の余り |
 
-二次索引は 1 件あたり、Ordered (int キー) で約 18B, Bitmap で約 3B (ベンチマークの値).
+二次索引は 1 件あたり、Ordered (int キー) で約 18B (ベンチマークの値).
 
 ---
 
