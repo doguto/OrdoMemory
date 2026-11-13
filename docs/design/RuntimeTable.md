@@ -42,7 +42,7 @@ int count;
 struct Slot
 {
     public int Dense;  // 使用中: dense の位置 / 空き: 次の空きスロット (空きリスト)
-    public int Gen;    // 世代. スロットを再利用するたびに進める
+    public uint Gen;   // 世代. 1 から始め、スロットを再利用するたびに進める. 0 は未使用 / 使用停止
 }
 Slot[] slots;
 
@@ -77,17 +77,25 @@ PK = (Gen << SlotBits) | Slot
 
 ### 対応する型
 
+PK は符号なし整数とする. 符号ビットも世代に使え、`>>` が論理シフトになるため.
+
 | PK の型 | スロット | 世代 | 同時に持てる件数 | 同じスロットの再利用回数 |
 |---|---|---|---|---|
-| int (既定) | 22 bit | 9 bit | 約 419 万 | 512 回 |
-| long | 32 bit | 31 bit | 約 21 億 | 約 21 億回 |
+| uint (既定) | 22 bit | 10 bit (1〜1023) | 約 419 万 | 1023 回 |
+| ulong | 32 bit | 32 bit | 約 43 億 | 約 43 億回 |
 
 - ビットの配分は生成時に決める.
 - PK は Record の識別子であり、大小関係に意味は無い. Key 順・挿入順を前提とした API は持たない.
 
+### 無効値
+
+- 世代は 1 から始める. そのため PK = 0 は払い出されず、`default` の PK がそのまま無効値 (`InvalidPk`) になる.
+  - 代入し忘れた PK が、スロット 0 の Record を静かに指す事故を防ぐため.
+- スロットの `Gen = 0` は「未使用 / 使用停止」を表す. 世代 0 の PK は Find で弾くため、どの PK とも一致しない.
+
 ### 世代の一周
 
-- 世代が最大値に達したスロットは、空きリストに戻さず使用を止める.
+- 世代が最大値に達したスロットは、`Gen = 0` にして空きリストに戻さず、使用を止める.
   - 古いハンドルが、同じスロットを再利用した別の Record を指す事故 (ABA) を防ぐため.
   - 使用を止めたスロットは 1 つにつき 8B を消費し続ける.
 - スロットを使い切った場合、Insert を失敗させる.
@@ -99,10 +107,11 @@ PK = (Gen << SlotBits) | Slot
 ### Find (PK から Record の解決)
 
 ```csharp
+var gen = pk >> SlotBits;
 var slot = pk & SlotMask;
-if ((uint)slot >= (uint)slotCount) return miss;
+if (gen == 0 || slot >= (uint)slotCount) return miss;   // 無効値 / 使用停止との一致を弾く
 ref var s = ref slots[slot];
-if (s.Gen != pk >> SlotBits) return miss;    // 削除済み / 再利用済み
+if (s.Gen != gen) return miss;               // 削除済み / 再利用済み
 return ref dense[s.Dense];
 ```
 
@@ -110,7 +119,7 @@ return ref dense[s.Dense];
 
 ### Insert
 
-1. 空きリストの先頭からスロットを取る. 無ければ `slotCount` 番目を新しく使う.
+1. 空きリストの先頭からスロットを取る. 無ければ `slotCount` 番目を新しく使い、`Gen = 1` とする.
    - 直前に空いたスロットから使うため、キャッシュに乗っていることが多い.
 2. `dense[count]` に書き込み、`denseToSlot[count] = slot`、`slots[slot].Dense = count` とする.
 3. PK = `(Gen << SlotBits) | slot` を返す.
@@ -189,7 +198,7 @@ MySQL (InnoDB) の二次索引と同様に、B+Tree のキーを `(SecondaryKey,
 
 ### Hash
 
-- Unique: `Dictionary<TKey, int>`.
+- Unique: `Dictionary<TKey, uint>`.
 - 非 Unique: 値ごとに PK の配列を持つ. PK は単調増加しないため配列は順序を持たず、削除は末尾との入れ替えとする.
 
 ### Bitmap
@@ -219,14 +228,16 @@ MySQL (InnoDB) の二次索引と同様に、B+Tree のキーを `(SecondaryKey,
 ```csharp
 public sealed class SampleTable
 {
-    public bool TryInsert(in SampleRow row, out int pk);
-    public bool TryBulkInsert(ReadOnlySpan<SampleRow> rows, Span<int> pks);
+    public const uint InvalidPk = 0;
 
-    public bool TryFind(int pk, out SampleRow row);
-    public ref readonly SampleRow FindRef(int pk, out bool found);
+    public bool TryInsert(in SampleRow row, out uint pk);
+    public bool TryBulkInsert(ReadOnlySpan<SampleRow> rows, Span<uint> pks);
 
-    public bool Update(int pk, Optional<string> name = default, Optional<string> description = default);
-    public bool Remove(int pk);
+    public bool TryFind(uint pk, out SampleRow row);
+    public ref readonly SampleRow FindRef(uint pk, out bool found);
+
+    public bool Update(uint pk, Optional<string> name = default, Optional<string> description = default);
+    public bool Remove(uint pk);
 
     public AllEnumerable All();
     public bool TryFindFirstByName(string name, out SampleRow row);

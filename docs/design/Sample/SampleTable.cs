@@ -5,18 +5,21 @@ namespace OrdoMemory.Sample
 {
     // 世代付きハンドル + sparse set によるテーブル.
     // PK = (世代 << SlotBits) | スロット番号. Record は dense に隙間無く並べ、削除は末尾との入れ替えで行う.
+    // 世代は 1 から始めるため、PK = 0 (default) は払い出されず、無効値として使える.
     public sealed class SampleTable
     {
         const int SlotBits = 22;
-        const int SlotMask = (1 << SlotBits) - 1;
-        const int MaxSlots = SlotMask + 1;
-        const int MaxGen = (1 << (31 - SlotBits)) - 1;
+        const uint SlotMask = (1u << SlotBits) - 1;
+        const int MaxSlots = (int)SlotMask + 1;
+        const uint MaxGen = (1u << (32 - SlotBits)) - 1;
         const int MinGrowLength = 4;
+
+        public const uint InvalidPk = 0;
 
         struct Slot
         {
             public int Dense;   // 使用中: dense の位置 / 空き: 次の空きスロット
-            public int Gen;
+            public uint Gen;    // 0: 未使用 / 使用を止めた. どの PK とも一致しない
         }
 
         // 生存している Record だけを隙間無く並べる. 順序は保証しない.
@@ -52,11 +55,11 @@ namespace OrdoMemory.Sample
             slots = new Slot[capacity];
         }
 
-        public bool TryInsert(in SampleRow row, out int pk)
+        public bool TryInsert(in SampleRow row, out uint pk)
         {
             if (!TryReserve(1))
             {
-                pk = 0;
+                pk = InvalidPk;
                 return false;
             }
 
@@ -66,24 +69,24 @@ namespace OrdoMemory.Sample
         }
 
         // 払い出した PK は pks の先頭から書き込む. 確保できない場合は何も挿入しない.
-        public bool TryBulkInsert(ReadOnlySpan<SampleRow> rows, Span<int> pks)
+        public bool TryBulkInsert(ReadOnlySpan<SampleRow> rows, Span<uint> pks)
         {
             if (pks.Length < rows.Length) throw new ArgumentException("pks is shorter than rows.", nameof(pks));
             if (!TryReserve(rows.Length)) return false;
 
             // 実装では ArrayPool から借りる.
-            var entries = new KeyValuePair<string, int>[rows.Length];
+            var entries = new KeyValuePair<string, uint>[rows.Length];
             for (var i = 0; i < rows.Length; i++)
             {
                 pks[i] = Store(rows[i]);
-                entries[i] = new KeyValuePair<string, int>(rows[i].Name, pks[i]);
+                entries[i] = new KeyValuePair<string, uint>(rows[i].Name, pks[i]);
             }
 
             nameIndex.AddRange(entries);
             return true;
         }
 
-        public bool TryFind(int pk, out SampleRow row)
+        public bool TryFind(uint pk, out SampleRow row)
         {
             if (TryGetDense(pk, out var index))
             {
@@ -97,7 +100,7 @@ namespace OrdoMemory.Sample
 
         // 見つからない場合は found = false とし、ダミーへの参照を返す.
         // 参照は次の Insert / Remove まで有効.
-        public ref readonly SampleRow FindRef(int pk, out bool found)
+        public ref readonly SampleRow FindRef(uint pk, out bool found)
         {
             found = TryGetDense(pk, out var index);
             return ref found ? ref dense[index] : ref NotFound;
@@ -106,7 +109,7 @@ namespace OrdoMemory.Sample
         static readonly SampleRow NotFound = default;
 
         // 指定した項目だけを更新する. アロケーションは発生しない.
-        public bool Update(int pk, Optional<string> name = default, Optional<string> description = default)
+        public bool Update(uint pk, Optional<string> name = default, Optional<string> description = default)
         {
             if (!TryGetDense(pk, out var index)) return false;
 
@@ -124,7 +127,7 @@ namespace OrdoMemory.Sample
         }
 
         // 末尾の Record を空いた位置へ移す. 移した Record への参照は無効になる.
-        public bool Remove(int pk)
+        public bool Remove(uint pk)
         {
             if (!TryGetDense(pk, out var index)) return false;
 
@@ -143,7 +146,7 @@ namespace OrdoMemory.Sample
             count = last;
 
             // 世代を進めて空きリストへ戻す. 一周したスロットは古い PK と区別できないため、使用を止める.
-            var slot = pk & SlotMask;
+            var slot = (int)(pk & SlotMask);
             ref var s = ref slots[slot];
             if (s.Gen < MaxGen)
             {
@@ -153,7 +156,7 @@ namespace OrdoMemory.Sample
             }
             else
             {
-                s.Gen = -1;
+                s.Gen = 0;
                 retired++;
             }
 
@@ -226,7 +229,7 @@ namespace OrdoMemory.Sample
 
             public ref readonly SampleRow Current => ref table.dense[index];
 
-            public int CurrentPk => table.PkOf(index);
+            public uint CurrentPk => table.PkOf(index);
 
             public bool MoveNext()
             {
@@ -238,9 +241,9 @@ namespace OrdoMemory.Sample
         public readonly struct NameEnumerable
         {
             readonly SampleTable table;
-            readonly IEnumerable<int> pks;
+            readonly IEnumerable<uint> pks;
 
-            internal NameEnumerable(SampleTable table, IEnumerable<int> pks)
+            internal NameEnumerable(SampleTable table, IEnumerable<uint> pks)
             {
                 this.table = table;
                 this.pks = pks;
@@ -256,10 +259,10 @@ namespace OrdoMemory.Sample
         public struct NameEnumerator
         {
             readonly SampleTable table;
-            readonly IEnumerator<int> pks;
+            readonly IEnumerator<uint> pks;
             int index;
 
-            internal NameEnumerator(SampleTable table, IEnumerator<int> pks)
+            internal NameEnumerator(SampleTable table, IEnumerator<uint> pks)
             {
                 this.table = table;
                 this.pks = pks;
@@ -268,12 +271,12 @@ namespace OrdoMemory.Sample
 
             public ref readonly SampleRow Current => ref table.dense[index];
 
-            public int CurrentPk => pks.Current;
+            public uint CurrentPk => pks.Current;
 
             public bool MoveNext()
             {
                 if (!pks.MoveNext()) return false;
-                index = table.slots[pks.Current & SlotMask].Dense;
+                index = table.slots[(int)(pks.Current & SlotMask)].Dense;
                 return true;
             }
         }
@@ -295,7 +298,7 @@ namespace OrdoMemory.Sample
         }
 
         // 事前に TryReserve で確保済みであること.
-        int Store(in SampleRow row)
+        uint Store(in SampleRow row)
         {
             int slot;
             if (freeHead >= 0)
@@ -306,6 +309,7 @@ namespace OrdoMemory.Sample
             else
             {
                 slot = slotCount++;
+                slots[slot].Gen = 1;
             }
 
             dense[count] = row;
@@ -313,13 +317,15 @@ namespace OrdoMemory.Sample
             slots[slot].Dense = count;
             count++;
             version++;
-            return (slots[slot].Gen << SlotBits) | slot;
+            return MakePk(slots[slot].Gen, slot);
         }
 
-        bool TryGetDense(int pk, out int index)
+        bool TryGetDense(uint pk, out int index)
         {
+            // 世代 0 の PK は払い出していない. 使用を止めたスロット (Gen = 0) との一致もここで弾く.
+            var gen = pk >> SlotBits;
             var slot = pk & SlotMask;
-            if ((uint)slot >= (uint)slotCount || slots[slot].Gen != pk >> SlotBits)
+            if (gen == 0 || slot >= (uint)slotCount || slots[slot].Gen != gen)
             {
                 index = -1;
                 return false;
@@ -329,10 +335,15 @@ namespace OrdoMemory.Sample
             return true;
         }
 
-        int PkOf(int index)
+        uint PkOf(int index)
         {
             var slot = denseToSlot[index];
-            return (slots[slot].Gen << SlotBits) | slot;
+            return MakePk(slots[slot].Gen, slot);
+        }
+
+        static uint MakePk(uint gen, int slot)
+        {
+            return (gen << SlotBits) | (uint)slot;
         }
 
         static void EnsureCapacity<T>(ref T[] array, int required)

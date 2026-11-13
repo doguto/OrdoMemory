@@ -15,22 +15,22 @@ namespace OrdoMemory.Sample
         public abstract int Count { get; }
 
         /// <summary>(key, pk) を登録する. 既に同じ組がある場合は何もせず false を返す.</summary>
-        public abstract bool Insert(TKey key, int pk);
+        public abstract bool Insert(TKey key, uint pk);
 
         /// <summary>
         /// 既存の内容に items を加える. 件数が既存に比べて多い場合は、整列して作り直す.
         /// 完全に同じ組は 1 件にまとめる (Insert と同じ扱い).
         /// </summary>
-        public abstract void AddRange(IReadOnlyList<KeyValuePair<TKey, int>> items);
+        public abstract void AddRange(IReadOnlyList<KeyValuePair<TKey, uint>> items);
 
         /// <summary>(key, pk) を削除する. 存在しない場合は false を返す.</summary>
-        public abstract bool Remove(TKey key, int pk);
+        public abstract bool Remove(TKey key, uint pk);
 
         /// <summary>min 以上 max 以下の SecondaryKey を持つ PK を、(SecondaryKey, PK) の昇順で返す.</summary>
-        public abstract IEnumerable<int> Range(TKey min, TKey max);
+        public abstract IEnumerable<uint> Range(TKey min, TKey max);
 
         /// <summary>SecondaryKey が key と等しい PK を返す.</summary>
-        public virtual IEnumerable<int> Equal(TKey key)
+        public virtual IEnumerable<uint> Equal(TKey key)
         {
             return Range(key, key);
         }
