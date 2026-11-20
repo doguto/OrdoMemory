@@ -3,3 +3,5 @@ obj/
 .idea/
 *.user
 TestResults/
+BenchmarkDotNet.Artifacts/
+*.stackdump

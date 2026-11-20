@@ -1,0 +1,94 @@
+using System;
+
+namespace OrdoMemory.Benchmark.Stores
+{
+    public sealed class OrdoMemoryStore : IStore
+    {
+        OrdoItemTable table = new OrdoItemTable();
+
+        public void BulkLoad(ItemData[] rows, long[] keys)
+        {
+            var items = new OrdoItem[rows.Length];
+            for (var i = 0; i < rows.Length; i++) items[i] = ToItem(rows[i]);
+
+            var pks = new uint[rows.Length];
+            if (!table.TryBulkInsert(items, pks)) throw new InvalidOperationException("bulk insert failed");
+            for (var i = 0; i < pks.Length; i++) keys[i] = pks[i];
+        }
+
+        public long Insert(in ItemData row)
+        {
+            if (!table.TryInsert(ToItem(row), out var pk)) throw new InvalidOperationException("insert failed");
+            return pk;
+        }
+
+        public bool TryFind(long key, out ItemData row)
+        {
+            var found = table.TryFind((uint)key, out var item);
+            row = ToData(item);
+            return found;
+        }
+
+        public bool TryFindByCode(int code, out ItemData row)
+        {
+            var found = table.TryFindByCode(code, out var item);
+            row = ToData(item);
+            return found;
+        }
+
+        public bool TryFindByName(string name, out ItemData row)
+        {
+            var found = table.TryFindByName(name, out var item);
+            row = ToData(item);
+            return found;
+        }
+
+        public long SumByCategory(int category)
+        {
+            long sum = 0;
+            foreach (ref readonly var item in table.FindAllByCategory(category)) sum += item.Value;
+            return sum;
+        }
+
+        public long SumRangeByCode(int min, int max)
+        {
+            long sum = 0;
+            foreach (ref readonly var item in table.FindRangeByCode(min, max)) sum += item.Value;
+            return sum;
+        }
+
+        public long SumAll()
+        {
+            long sum = 0;
+            foreach (ref readonly var item in table.All()) sum += item.Value;
+            return sum;
+        }
+
+        public bool UpdateValue(long key, int value) => table.Update((uint)key, value: value);
+
+        public bool UpdateCategory(long key, int category) => table.Update((uint)key, category: category);
+
+        public bool Remove(long key) => table.Remove((uint)key);
+
+        public void UpdateValues(long[] keys, int[] values)
+        {
+            for (var i = 0; i < keys.Length; i++) table.Update((uint)keys[i], value: values[i]);
+        }
+
+        public void Dispose()
+        {
+            table = null;
+        }
+
+        static OrdoItem ToItem(in ItemData row) => new OrdoItem(row.Code, row.Category, row.Name, row.Value, row.Description);
+
+        static ItemData ToData(in OrdoItem item) => new ItemData
+        {
+            Code = item.Code,
+            Category = item.Category,
+            Value = item.Value,
+            Name = item.Name,
+            Description = item.Description,
+        };
+    }
+}

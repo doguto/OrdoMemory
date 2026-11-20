@@ -1,14 +1,15 @@
 # Runtimeテーブル データ構造の比較結果
 
 Runtimeテーブル (`RuntimeTable.md`) のデータ構造の候補を同じ条件で実装・計測し、採用する構造を決める.
-コードと再現手順は `bench/RuntimeTableBench/`. 生の結果 (全指標) は `bench/RuntimeTableBench/results/`.
+コードと再現手順は、コミット `16a2957` の `bench/RuntimeTableBench/` (`git show 16a2957:bench/RuntimeTableBench/README.md`). 生の結果 (全指標) は同コミットの `bench/RuntimeTableBench/results/`.
+実装後の、他の DB との比較は `bench/OrdoMemory.Benchmark/`.
 
 ## 条件
 
 - N = 1,000,000 件. 3 回計測した中央値.
 - Record は 32B の struct (`int Id, Score, Category; string Name, Description`). 文字列本体は共有しており、メモリに含まない.
 - ランタイム: CoreCLR (.NET 8.0) / Mono 6.8 (SGen GC, Unity の Mono バックエンドの近似). Intel Xeon 2.1GHz.
-- popcount は netstandard2.1 に合わせ SWAR. データ構造のコードが netstandard2.1 / C# 9 でコンパイルできることを `bench/NetStandardCheck` で確認済み.
+- popcount は netstandard2.1 に合わせ SWAR. データ構造のコードが netstandard2.1 / C# 9 でコンパイルできることを `bench/NetStandardCheck` (コミット `16a2957`) で確認済み.
 - 計測前に、全実装を参照実装 (`SortedDictionary` / `SortedSet`) と乱数操作で突き合わせて検証している (`verify`).
 
 ---
