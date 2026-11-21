@@ -19,10 +19,6 @@ namespace OrdoMemory.Benchmark.Stores
         public string Description { get; set; }
     }
 
-    /// <summary>
-    /// LiteDB 5 (組み込みのドキュメント DB). path が null なら MemoryStream 上に置く.
-    /// 部分更新の API が無いため、更新は読み出し → 書き戻しとする.
-    /// </summary>
     public sealed class LiteDbStore : IStore
     {
         readonly string path;

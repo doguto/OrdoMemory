@@ -2,11 +2,6 @@ using Microsoft.Data.Sqlite;
 
 namespace OrdoMemory.Benchmark.Stores
 {
-    /// <summary>
-    /// Microsoft.Data.Sqlite (ADO.NET). コマンドは準備済みのものを使い回す.
-    /// ファイルは WAL + synchronous=NORMAL (コミットごとの fsync をしない、一般的な設定).
-    /// path が null ならインメモリ.
-    /// </summary>
     public sealed class SqliteStore : IStore
     {
         const string Columns = "code, category, value, name, description";

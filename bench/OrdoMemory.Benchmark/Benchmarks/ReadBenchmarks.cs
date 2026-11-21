@@ -2,10 +2,6 @@ using BenchmarkDotNet.Attributes;
 
 namespace OrdoMemory.Benchmark.Benchmarks
 {
-    /// <summary>
-    /// 読み取りのみ. 全ての比較対象で測る.
-    /// 名前の対応: ReadRandom = db_bench readrandom, ReadZipfian = YCSB Workload C, ScanAll = db_bench readseq.
-    /// </summary>
     public class ReadBenchmarks : StoreBenchmarkBase
     {
         public const int RangeLength = 64;

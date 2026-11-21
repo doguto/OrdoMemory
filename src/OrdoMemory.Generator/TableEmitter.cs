@@ -138,7 +138,6 @@ namespace OrdoMemory.Generator
         {
             var row = m.RowFullName;
             var pk = m.PkType;
-            w.Line("// 払い出した PK は pks の先頭から書き込む. 容量の不足や Unique の重複がある場合は何も挿入しない.");
             w.Line($"public bool TryBulkInsert(global::System.ReadOnlySpan<{row}> rows, global::System.Span<{pk}> pks)");
             w.Open();
             w.Line("if (pks.Length < rows.Length) throw new global::System.ArgumentException(\"pks is shorter than rows.\", nameof(pks));");
@@ -217,8 +216,6 @@ namespace OrdoMemory.Generator
             w.Line("return false;");
             w.Close();
             w.Line();
-            w.Line("// 見つからない場合は found = false とし、default への参照を返す.");
-            w.Line("// 参照は次の Insert / BulkInsert / Remove / TrimExcess まで有効.");
             w.Line($"public ref readonly {row} FindRef({pk} pk, out bool found)");
             w.Open();
             w.Line("found = __store.TryGetIndex(pk, out var index);");
@@ -231,7 +228,6 @@ namespace OrdoMemory.Generator
         static void EmitUpdate(Writer w, TableModel m)
         {
             var parameters = string.Join(", ", m.Fields.Select(f => $"global::OrdoMemory.Optional<{f.Type}> {f.ParameterName} = default"));
-            w.Line("// 指定した項目だけを更新する. Unique な SecondaryKey が他の Record と重なる場合は何もせず false を返す.");
             w.Line($"public bool Update({m.PkType} pk, {parameters})");
             w.Open();
             w.Line("if (!__store.TryGetIndex(pk, out var __index)) return false;");
@@ -269,7 +265,6 @@ namespace OrdoMemory.Generator
             w.Line("__current = __next;");
             if (m.Keys.Count > 0)
             {
-                // 索引の構造が変わった場合は、索引を辿っている列挙子を無効にする.
                 var any = string.Join(" || ", Enumerable.Range(0, m.Keys.Count).Select(i => $"__changed{i}"));
                 w.Line($"if ({any}) __store.Touch();");
             }
@@ -281,7 +276,6 @@ namespace OrdoMemory.Generator
 
         static void EmitRemove(Writer w, TableModel m)
         {
-            w.Line("// 末尾の Record を空いた位置へ移す. 移した Record への参照は無効になる.");
             w.Line($"public bool Remove({m.PkType} pk)");
             w.Open();
             w.Line("if (!__store.TryGetIndex(pk, out var index)) return false;");
@@ -307,7 +301,6 @@ namespace OrdoMemory.Generator
             var enumerable = $"{store}.IndexEnumerable<{InnerEnumeratorType(m, k)}>";
             var first = k.Unique ? $"TryFindBy{name}" : $"TryFindFirstBy{name}";
 
-            if (!k.Unique) w.Line("// 索引上の先頭. Ordered では SecondaryKey が等しいものの中で PK の昇順の先頭.");
             w.Line($"public bool {first}({type} key, out {row} row)");
             w.Open();
             w.Line($"if ({idx}.TryGetFirst({Conv(k, "key")}, out var pk))");
@@ -333,7 +326,6 @@ namespace OrdoMemory.Generator
 
             if (!k.Hash)
             {
-                w.Line("// min 以上 max 以下を SecondaryKey の昇順で返す.");
                 w.Line($"public {enumerable} FindRangeBy{name}({type} min, {type} max) => __store.Enumerate({idx}.Range({Conv(k, "min")}, {Conv(k, "max")}));");
                 w.Line();
             }

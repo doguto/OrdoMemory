@@ -4,11 +4,6 @@ using BenchmarkDotNet.Attributes;
 
 namespace OrdoMemory.Benchmark.Benchmarks
 {
-    /// <summary>
-    /// N 件を一括で入れたストアに対して操作を繰り返す.
-    /// 1 回の呼び出しで Ops 回の操作を行い、結果は 1 操作あたりで示す.
-    /// 操作の引数は長さ StreamLength の列から順に取り、同じ数件だけがキャッシュに乗り続けることを避ける.
-    /// </summary>
     public abstract class StoreBenchmarkBase
     {
         public const int Ops = 1000;
@@ -65,7 +60,6 @@ namespace OrdoMemory.Benchmark.Benchmarks
             return result;
         }
 
-        // 呼び出しごとに Ops 個ずつ先へ進める.
         protected int NextBlock()
         {
             var start = cursor;
@@ -74,7 +68,6 @@ namespace OrdoMemory.Benchmark.Benchmarks
             return start;
         }
 
-        // 削除して同じ Code / Name で挿入し直す. 件数と Code の分布を保つため.
         protected void Replace(int index, int value)
         {
             store.Remove(keys[index]);

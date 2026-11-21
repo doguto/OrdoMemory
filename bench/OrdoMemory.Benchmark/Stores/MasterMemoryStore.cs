@@ -5,15 +5,11 @@ using OrdoMemory.Benchmark.MasterMemoryDb.Tables;
 
 namespace OrdoMemory.Benchmark.Stores
 {
-    /// <summary>
-    /// 読み取り専用の不変 DB. 書き込みは ImmutableBuilder で全体を作り直す (1 回ごとに O(n log n)).
-    /// </summary>
     public sealed class MasterMemoryStore : IStore
     {
         MemoryDatabase db = new MemoryDatabase(new MmItemTable(Array.Empty<MmItem>()));
         int nextId = 1;
 
-        // 公式の手順どおり DatabaseBuilder でバイナリを作り、MemoryDatabase で読み込む.
         public void BulkLoad(ItemData[] rows, long[] keys)
         {
             var items = new MmItem[rows.Length];

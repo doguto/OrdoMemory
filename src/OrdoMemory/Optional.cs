@@ -1,6 +1,5 @@
 namespace OrdoMemory
 {
-    // default は「指定なし」、値を渡すと null も含めて「その値に更新」を表す.
     public readonly struct Optional<T>
     {
         public readonly bool HasValue;

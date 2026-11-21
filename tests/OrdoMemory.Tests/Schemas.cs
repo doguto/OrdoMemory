@@ -37,14 +37,12 @@ namespace OrdoMemory.Tests
         public readonly int Pk;
     }
 
-    // 世代 1bit: 1 度削除したスロットは使用を止める.
     [OrdoTable(SlotBits = 31)]
     public readonly partial struct OneGenRow
     {
         public readonly int Value;
     }
 
-    // スロット 2bit: 同時に 4 件まで.
     [OrdoTable(SlotBits = 2)]
     public readonly partial struct TinyRow
     {

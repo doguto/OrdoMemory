@@ -7,7 +7,6 @@ using Microsoft.CodeAnalysis.Text;
 
 namespace OrdoMemory.Generator
 {
-    // Unity が対応する Microsoft.CodeAnalysis 3.8 で動かすため、IIncrementalGenerator ではなく ISourceGenerator を使う.
     [Generator]
     public sealed class OrdoTableGenerator : ISourceGenerator
     {

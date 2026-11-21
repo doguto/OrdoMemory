@@ -2,7 +2,6 @@ using System;
 
 namespace OrdoMemory.Benchmark
 {
-    // 全ストア共通の Record. 各ストアは自分の型に詰め替えて保持する.
     public struct ItemData
     {
         public int Code;
@@ -20,7 +19,6 @@ namespace OrdoMemory.Benchmark
 
         public static int CategoryCount(int n) => Math.Max(1, n / RowsPerCategory);
 
-        // Code は 0..n-1 の順列 (挿入順はランダム). Name は Code から一意に決まる.
         public static ItemData[] Create(int n, ulong seed)
         {
             var rng = new Rng(seed);
@@ -81,11 +79,6 @@ namespace OrdoMemory.Benchmark
         public double NextDouble() => (NextUInt64() >> 11) * (1.0 / (1UL << 53));
     }
 
-    /// <summary>
-    /// YCSB の ScrambledZipfianGenerator 相当 (θ = 0.99).
-    /// 人気の項目が先頭に固まらないよう、順位を FNV ハッシュで散らす.
-    /// J. Gray et al., "Quickly Generating Billion-Record Synthetic Databases", SIGMOD 1994.
-    /// </summary>
     public sealed class Zipfian
     {
         const double Theta = 0.99;

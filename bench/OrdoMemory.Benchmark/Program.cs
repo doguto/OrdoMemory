@@ -7,7 +7,6 @@ namespace OrdoMemory.Benchmark
 {
     static class Program
     {
-        // verify / footprint [出力先] / それ以外は BenchmarkDotNet の引数 (--filter, --job 等).
         static int Main(string[] args)
         {
             if (args.Length > 0 && args[0] == "verify") return Verify.Run() ? 0 : 1;

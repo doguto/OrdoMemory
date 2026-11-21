@@ -3,7 +3,6 @@ using System.Collections.Generic;
 
 namespace OrdoMemory
 {
-    /// <summary>完全一致でしか引かない Unique な SecondaryKey の索引. null のキーも 1 件だけ持てる.</summary>
     public sealed class HashUniqueIndex<TKey, TPk> where TPk : unmanaged
     {
         readonly Dictionary<TKey, TPk> map = new Dictionary<TKey, TPk>(KeyComparer<TKey>.Default);
@@ -30,7 +29,6 @@ namespace OrdoMemory
             return new SingleEnumerator(found, pk);
         }
 
-        // 同じ SecondaryKey が既にある場合は何もせず false を返す.
         public bool Insert(TKey key, TPk pk)
         {
             if (!KeyComparer<TKey>.IsNull(key)) return map.TryAdd(key, pk);
@@ -49,7 +47,6 @@ namespace OrdoMemory
             return true;
         }
 
-        // 重複があれば何も変更せず false を返す.
         public bool AddRange(ReadOnlySpan<TKey> keys, ReadOnlySpan<TPk> pks)
         {
             if (pks.Length < keys.Length) throw new ArgumentException("pks is shorter than keys.", nameof(pks));
@@ -92,10 +89,6 @@ namespace OrdoMemory
         }
     }
 
-    /// <summary>
-    /// 完全一致でしか引かない非 Unique な SecondaryKey の索引.
-    /// 値ごとに PK の配列を持つ. PK は単調増加しないため配列は順序を持たず、削除は末尾との入れ替えとする.
-    /// </summary>
     public sealed class HashMultiIndex<TKey, TPk> where TPk : unmanaged
     {
         const int InitialPostingLength = 2;
@@ -104,7 +97,7 @@ namespace OrdoMemory
         int nullPosting = -1;
 
         TPk[][] postings = new TPk[4][];
-        int[] lengths = new int[4];   // 空きでは次の空きの番号
+        int[] lengths = new int[4];
         int postingUsed;
         int postingFree = -1;
         int count;
@@ -135,7 +128,6 @@ namespace OrdoMemory
             return id < 0 ? default : new Enumerator(postings[id], lengths[id]);
         }
 
-        // 同じ組が既にあるかは確かめない (PK はテーブル内で一意なため).
         public bool Insert(TKey key, TPk pk)
         {
             var id = Find(key);
@@ -160,7 +152,6 @@ namespace OrdoMemory
             return true;
         }
 
-        // その値の件数 p に対して O(p).
         public bool Remove(TKey key, TPk pk)
         {
             var id = Find(key);

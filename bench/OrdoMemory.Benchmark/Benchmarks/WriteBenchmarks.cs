@@ -3,11 +3,6 @@ using BenchmarkDotNet.Attributes;
 
 namespace OrdoMemory.Benchmark.Benchmarks
 {
-    /// <summary>
-    /// 1 件ずつの書き込み. 件数を保つ操作だけにし、繰り返しても状態が変わらないようにする.
-    /// 名前の対応: Overwrite = db_bench overwrite, RemoveInsert = deleterandom + fillrandom.
-    /// MasterMemory は 1 件ごとに全体を作り直すため除く (BatchUpdateBenchmarks で測る).
-    /// </summary>
     public class WriteBenchmarks : StoreBenchmarkBase
     {
         int[] uniform;
@@ -45,12 +40,8 @@ namespace OrdoMemory.Benchmark.Benchmarks
         }
     }
 
-    /// <summary>
-    /// Ops 件の更新を、各ストアのまとめて書く手段 (トランザクション / ImmutableBuilder) で 1 回に行う.
-    /// </summary>
     public class BatchUpdateBenchmarks : StoreBenchmarkBase
     {
-        // 1 回のバッチ内で同じ Record が重ならないよう、順列から連続して取る.
         int[] permutation;
         int position;
         long[] batchKeys;

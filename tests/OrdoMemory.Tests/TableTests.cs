@@ -217,11 +217,9 @@ namespace OrdoMemory.Tests
             var table = new ItemTable();
             for (var i = 0; i < 100; i++) table.TryInsert(NewItem(i), out _);
 
-            // 既存と重複 (1 件ずつ挿入する経路).
             var conflict = new[] { NewItem(1000), NewItem(5, tag: "fresh") };
             Assert.False(table.TryBulkInsert(conflict, new uint[2]));
 
-            // バッチ内で重複 (作り直す経路). Code の索引は通り、Tag の索引で失敗する.
             var batch = Enumerable.Range(0, 200).Select(i => NewItem(2000 + i, tag: i == 150 ? "dup" : i == 10 ? "dup" : null)).ToArray();
             Assert.False(table.TryBulkInsert(batch, new uint[200]));
 

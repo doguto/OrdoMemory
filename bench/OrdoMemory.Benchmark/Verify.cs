@@ -3,9 +3,6 @@ using System.Collections.Generic;
 
 namespace OrdoMemory.Benchmark
 {
-    /// <summary>
-    /// 同じ操作列を全ストアで実行し、結果の列を Dictionary 版と突き合わせる. 計測の前に通すこと.
-    /// </summary>
     public static class Verify
     {
         const int N = 2000;

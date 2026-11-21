@@ -3,11 +3,6 @@ using System.Runtime.CompilerServices;
 
 namespace OrdoMemory
 {
-    /// <summary>
-    /// 世代付きハンドル + sparse set. PK = (世代 &lt;&lt; slotBits) | スロット番号.
-    /// 世代は 1 から始めるため、PK = 0 (default) は払い出されない.
-    /// 生成コードから使う. 二次索引の整合は呼び出し側の責務.
-    /// </summary>
     public sealed class RowStore<TRow, TPk, TPkTraits>
         where TRow : struct
         where TPk : unmanaged
@@ -18,8 +13,8 @@ namespace OrdoMemory
 
         struct Slot
         {
-            public int Dense;   // 使用中: dense の位置 / 空き: 次の空きスロット
-            public uint Gen;    // 0: 未使用 / 使用を止めた
+            public int Dense;
+            public uint Gen;
         }
 
         readonly int slotBits;
@@ -89,7 +84,6 @@ namespace OrdoMemory
             return ref dense[index];
         }
 
-        // 生存が保証された PK (索引が返したもの) にのみ使う.
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int IndexOf(TPk pk)
         {
@@ -102,7 +96,6 @@ namespace OrdoMemory
             return MakePk(slots[slot].Gen, slot);
         }
 
-        // required 件分の dense とスロットを確保する. 確保できない場合は何も変更しない.
         public bool TryReserve(int required)
         {
             if (required < 0) throw new ArgumentOutOfRangeException(nameof(required));
@@ -117,7 +110,6 @@ namespace OrdoMemory
             return true;
         }
 
-        // 事前に TryReserve で確保済みであること.
         public TPk Store(in TRow row)
         {
             int slot;
@@ -140,7 +132,6 @@ namespace OrdoMemory
             return MakePk(slots[slot].Gen, slot);
         }
 
-        // 末尾の Record を index へ移す. 移した Record への参照は無効になる.
         public void RemoveAt(int index)
         {
             var slot = denseToSlot[index];
@@ -152,11 +143,9 @@ namespace OrdoMemory
                 slots[denseToSlot[index]].Dense = index;
             }
 
-            // Record が持つ参照を GC に解放させる.
             dense[last] = default;
             count = last;
 
-            // 一周したスロットは古い PK と区別できないため、使用を止める (ABA 対策).
             ref var s = ref slots[slot];
             if (s.Gen < maxGen)
             {
@@ -173,7 +162,6 @@ namespace OrdoMemory
             version++;
         }
 
-        // 索引の構造が変わったことを列挙子に知らせる.
         public void Touch()
         {
             version++;
@@ -185,7 +173,6 @@ namespace OrdoMemory
             if (expected != version) ThrowModified();
         }
 
-        // スロット表は使用済みの分 (slotCount) までしか縮めない.
         public void TrimExcess()
         {
             Array.Resize(ref dense, count);
@@ -236,7 +223,6 @@ namespace OrdoMemory
             }
         }
 
-        // 順序は保証しない (Remove のたびに変わる).
         public struct AllEnumerator
         {
             readonly RowStore<TRow, TPk, TPkTraits> store;
@@ -280,7 +266,6 @@ namespace OrdoMemory
             }
         }
 
-        // 索引が返す PK を Record に解決する. 索引の PK は常に生存しているため、世代の確認は行わない.
         public struct IndexEnumerator<TInner> where TInner : struct, IPkEnumerator<TPk>
         {
             readonly RowStore<TRow, TPk, TPkTraits> store;

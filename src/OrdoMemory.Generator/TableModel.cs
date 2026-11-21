@@ -19,7 +19,6 @@ namespace OrdoMemory.Generator
         public bool Hash;
         public bool Unique;
 
-        // 索引に渡すキーの型と、フィールドの値からの変換式の書式 ({0} に値の式が入る).
         public string KeyType;
         public string KeyTraits;
         public string Convert;
@@ -91,7 +90,6 @@ namespace OrdoMemory.Generator
             model.PkType = pk64 ? "ulong" : "uint";
             model.PkTraits = pk64 ? "global::OrdoMemory.UInt64Pk" : "global::OrdoMemory.UInt32Pk";
 
-            // 世代は uint で持つため 32bit 以下. 世代とスロットはどちらも 1bit 以上.
             var minBits = pk64 ? 32 : 1;
             var maxBits = pk64 ? 63 : 31;
             if (slotBits == 0) slotBits = pk64 ? 32 : 22;
@@ -129,7 +127,6 @@ namespace OrdoMemory.Generator
                     Type = field.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                     ParameterName = "@" + char.ToLowerInvariant(field.Name[0]) + field.Name.Substring(1),
                 };
-                // Update の第 1 引数 pk との衝突を避ける.
                 if (fieldModel.ParameterName == "@pk") fieldModel.ParameterName = "@pkValue";
                 model.Fields.Add(fieldModel);
 
@@ -168,7 +165,6 @@ namespace OrdoMemory.Generator
             return model;
         }
 
-        // 整数型は int / long / ulong にまとめ、Ordered 索引で正規化キーを PK と詰められるようにする.
         static bool TryMapKeyType(ITypeSymbol type, KeyModel key)
         {
             var special = type.SpecialType;

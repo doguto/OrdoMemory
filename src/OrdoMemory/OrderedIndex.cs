@@ -5,12 +5,6 @@ using System.Runtime.CompilerServices;
 
 namespace OrdoMemory
 {
-    /// <summary>
-    /// 配列アリーナ上の B+Tree.
-    /// ノードはオブジェクトにせず、葉と内部ノードをそれぞれ数本の配列に置いて int の番号で指す.
-    /// 非 Unique の索引のキーは (SecondaryKey, PK) の組. 正規化キーと PK が 64bit に収まる場合は 1 つの ulong に詰める.
-    /// 内部ノードの各エントリは (子の最小キー, 子). 削除は空になったノードだけを解放する (free-at-empty).
-    /// </summary>
     public sealed class OrderedIndex<TKey, TKeyTraits, TPk, TPkTraits>
         where TKeyTraits : struct, IOrderedKeyTraits<TKey>
         where TPk : unmanaged
@@ -18,7 +12,6 @@ namespace OrdoMemory
     {
         public const int DefaultNodeSize = 64;
 
-        // 一括挿入で、件数が既存のこの割合未満なら 1 件ずつ挿入する.
         const int RebuildRatio = 16;
 
         readonly int b;
@@ -28,27 +21,25 @@ namespace OrdoMemory
         readonly int pkBits;
         readonly ulong pkMask;
 
-        // 葉: スロット [leaf * b, leaf * b + b)
         ulong[] lNorm;
-        TKey[] lFull;   // NeedsFull のときのみ
-        TPk[] lPk;      // !packsPk のときのみ
+        TKey[] lFull;
+        TPk[] lPk;
         int[] lCount;
         int[] lNext;
         int[] lPrev;
         int leafUsed;
         int leafFree;
 
-        // 内部ノード
         ulong[] iNorm;
-        TKey[] iFull;   // NeedsFull のときのみ
-        ulong[] iPk;    // comparesPk のときのみ
+        TKey[] iFull;
+        ulong[] iPk;
         int[] iChild;
         int[] iCount;
         int innerUsed;
         int innerFree;
 
         int root;
-        int height;     // 0: 根が葉
+        int height;
         int count;
 
         int[] pathNode = new int[16];
@@ -81,8 +72,6 @@ namespace OrdoMemory
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         static ulong ToU(TPk pk) => default(TPkTraits).ToUInt64(pk);
-
-        // ---- 比較 ----
 
         readonly struct Probe
         {
@@ -132,7 +121,6 @@ namespace OrdoMemory
             return Compare(iNorm[slot], NeedsFull ? iFull[slot] : default, comparesPk ? iPk[slot] : 0, probe);
         }
 
-        // PK を除いた SecondaryKey だけの比較.
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         int CompareKey(int slot, ulong keyNorm, TKey key)
         {
@@ -162,7 +150,6 @@ namespace OrdoMemory
             return lo;
         }
 
-        // 最小キー <= probe となる最後の子の位置. 先頭の子は下限なしとして扱う.
         int ChildIndex(int node, in Probe probe)
         {
             var lo = 0;
@@ -192,14 +179,11 @@ namespace OrdoMemory
             return node;
         }
 
-        // ---- 検索 ----
-
         public bool ContainsKey(TKey key)
         {
             return TryGetFirst(key, out _);
         }
 
-        // SecondaryKey が等しいものの中では PK の昇順で先頭.
         public bool TryGetFirst(TKey key, out TPk pk)
         {
             var e = Range(key, key);
@@ -218,7 +202,6 @@ namespace OrdoMemory
             return Range(key, key);
         }
 
-        // min 以上 max 以下を (SecondaryKey, PK) の昇順で返す.
         public RangeEnumerator Range(TKey min, TKey max)
         {
             var traits = default(TKeyTraits);
@@ -287,9 +270,6 @@ namespace OrdoMemory
             }
         }
 
-        // ---- 挿入 ----
-
-        // 既に同じエントリ (Unique では同じ SecondaryKey) がある場合は何もせず false を返す.
         public bool Insert(TKey key, TPk pk)
         {
             var probe = MakeProbe(key, ToU(pk));
@@ -304,7 +284,6 @@ namespace OrdoMemory
                 return true;
             }
 
-            // 右端の葉の末尾への追記は、新しい葉に新エントリだけを置く (単調増加の挿入で葉を満杯に保つ).
             var split = pos == b && lNext[leaf] < 0 ? b : b / 2;
             var right = AllocLeaf();
             MoveLeafEntries(leaf, split, right, b - split);
@@ -358,7 +337,6 @@ namespace OrdoMemory
             if (!packsPk) Array.Copy(lPk, src, lPk, dst, n);
         }
 
-        // level の親に (sep, child) を追加する. leftChild は分割前のノード (根の分割で使う).
         void PromoteSplit(int level, ulong sepNorm, TKey sepFull, ulong sepPk, int child, int leftChild)
         {
             while (true)
@@ -441,8 +419,6 @@ namespace OrdoMemory
             iChild[slot] = child;
         }
 
-        // ---- 削除 ----
-
         public bool Remove(TKey key, TPk pk)
         {
             if (count == 0) return false;
@@ -481,7 +457,6 @@ namespace OrdoMemory
             return true;
         }
 
-        // level のノードから pathPos[level] の子を外す. 空になったら親からも外す.
         void RemoveFromParent(int level)
         {
             while (true)
@@ -504,7 +479,6 @@ namespace OrdoMemory
 
                 if (level == height)
                 {
-                    // 子が 1 つの根は取り除く.
                     while (height > 0 && iCount[root] == 1)
                     {
                         var old = root;
@@ -522,12 +496,6 @@ namespace OrdoMemory
             }
         }
 
-        // ---- 一括挿入 / 作り直し ----
-
-        /// <summary>
-        /// 件数が既存に比べて少なければ 1 件ずつ挿入し、多ければ整列してマージし、下から作り直す.
-        /// 重複 (Unique では SecondaryKey の重複) があれば何も変更せず false を返す.
-        /// </summary>
         public bool AddRange(ReadOnlySpan<TKey> keys, ReadOnlySpan<TPk> pks)
         {
             if (pks.Length < keys.Length) throw new ArgumentException("pks is shorter than keys.", nameof(pks));
@@ -550,7 +518,6 @@ namespace OrdoMemory
             return MergeRebuild(keys, pks);
         }
 
-        // 余った容量を返す. ノードを満杯に詰めて作り直す.
         public void TrimExcess()
         {
             var buf = new EntryBuffer(count);
@@ -646,7 +613,6 @@ namespace OrdoMemory
             }
         }
 
-        // 整列済みのエントリから、葉を満杯に詰めて下から積む.
         void Build(in EntryBuffer entries, int n)
         {
             var leaves = Math.Max(1, (n + b - 1) / b);
@@ -660,7 +626,6 @@ namespace OrdoMemory
             var upper = ArrayPool<int>.Shared.Rent((leaves + b - 1) / b);
             try
             {
-                // Reset で作った根 (葉 0) から順に使う.
                 leafUsed = 0;
                 var prevLeaf = -1;
                 for (var l = 0; l < leaves; l++)
@@ -774,8 +739,6 @@ namespace OrdoMemory
             }
         }
 
-        // ---- ノードの確保 ----
-
         void Reset(int leafCapacity, int innerCapacity)
         {
             lNorm = new ulong[leafCapacity * b];
@@ -795,7 +758,6 @@ namespace OrdoMemory
             innerUsed = 0;
             innerFree = -1;
 
-            // 根は常に存在させ、挿入と探索で空の木を特別扱いしない.
             root = AllocLeaf();
             height = 0;
             count = 0;

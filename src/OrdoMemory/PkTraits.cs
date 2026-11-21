@@ -2,7 +2,6 @@ using System.Runtime.CompilerServices;
 
 namespace OrdoMemory
 {
-    // struct で渡し、JIT に定数畳み込みとインライン化をさせる.
     public interface IPkTraits<TPk> where TPk : unmanaged
     {
         int Bits { get; }

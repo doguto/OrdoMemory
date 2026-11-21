@@ -3,10 +3,6 @@ using BenchmarkDotNet.Attributes;
 
 namespace OrdoMemory.Benchmark.Benchmarks
 {
-    /// <summary>
-    /// 空のストアに N 件を入れるまで. 1 回ごとに新しいストアを作るため、呼び出しは 1 反復につき 1 回.
-    /// 結果は N 件全体の時間 (1 件あたりではない).
-    /// </summary>
     [InvocationCount(1)]
     public abstract class LoadBenchmarkBase
     {
@@ -47,7 +43,6 @@ namespace OrdoMemory.Benchmark.Benchmarks
         }
     }
 
-    // 名前の対応: db_bench fillrandom (一括).
     public class BulkLoadBenchmarks : LoadBenchmarkBase
     {
         [Benchmark(Description = "Bulk load N rows")]
@@ -57,7 +52,6 @@ namespace OrdoMemory.Benchmark.Benchmarks
         }
     }
 
-    // 名前の対応: db_bench fillrandom (1 件ずつ, 自動コミット).
     public class InsertBenchmarks : LoadBenchmarkBase
     {
         public override IEnumerable<Target> TargetSource => BenchEnv.WritableTargets();

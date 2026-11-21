@@ -22,10 +22,6 @@ namespace OrdoMemory.Benchmark.Stores
         public string Description { get; set; }
     }
 
-    /// <summary>
-    /// sqlite-net (Unity でよく使われる ORM). その API の普通の使い方で書く.
-    /// ファイルは WAL + synchronous=NORMAL. path が null ならインメモリ.
-    /// </summary>
     public sealed class SqliteNetStore : IStore
     {
         readonly string path;

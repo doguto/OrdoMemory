@@ -1,7 +1,5 @@
 namespace OrdoMemory.Sample
 {
-    // Update の部分更新用. default は「指定なし」、値を渡すと null も含めて「その値に更新」を表す.
-    // 構造体のためアロケーションは発生しない.
     public readonly struct Optional<T>
     {
         public readonly bool HasValue;

@@ -2,7 +2,6 @@ using System.Collections.Generic;
 
 namespace OrdoMemory.Benchmark.Stores
 {
-    // BCL のコレクションだけで素直に書いた場合の基準.
     public sealed class DictionaryStore : IStore
     {
         readonly Dictionary<int, ItemData> rows = new Dictionary<int, ItemData>();
