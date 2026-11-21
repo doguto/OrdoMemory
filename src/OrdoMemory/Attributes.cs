@@ -2,7 +2,7 @@ using System;
 
 namespace OrdoMemory
 {
-    public enum PkKind
+    public enum PrimaryKeyKind
     {
         UInt32,
         UInt64,
@@ -19,7 +19,7 @@ namespace OrdoMemory
     {
         public string TableName { get; set; }
 
-        public PkKind Pk { get; set; } = PkKind.UInt32;
+        public PrimaryKeyKind PrimaryKey { get; set; } = PrimaryKeyKind.UInt32;
 
         public int SlotBits { get; set; }
     }

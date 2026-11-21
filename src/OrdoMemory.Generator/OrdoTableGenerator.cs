@@ -23,20 +23,20 @@ namespace OrdoMemory.Generator
             if (!(context.SyntaxReceiver is Receiver receiver)) return;
 
             var compilation = context.Compilation;
-            var tableAttr = compilation.GetTypeByMetadataName(TableAttributeName);
-            var keyAttr = compilation.GetTypeByMetadataName(KeyAttributeName);
-            if (tableAttr == null || keyAttr == null) return;
+            var tableAttributeType = compilation.GetTypeByMetadataName(TableAttributeName);
+            var keyAttributeType = compilation.GetTypeByMetadataName(KeyAttributeName);
+            if (tableAttributeType == null || keyAttributeType == null) return;
 
             var done = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
-            foreach (var decl in receiver.Candidates)
+            foreach (var declaration in receiver.Candidates)
             {
-                var semantic = compilation.GetSemanticModel(decl.SyntaxTree);
-                if (!(semantic.GetDeclaredSymbol(decl, context.CancellationToken) is INamedTypeSymbol type)) continue;
+                var semanticModel = compilation.GetSemanticModel(declaration.SyntaxTree);
+                if (!(semanticModel.GetDeclaredSymbol(declaration, context.CancellationToken) is INamedTypeSymbol type)) continue;
 
-                var attr = type.GetAttributes().FirstOrDefault(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, tableAttr));
-                if (attr == null || !done.Add(type)) continue;
+                var tableAttribute = type.GetAttributes().FirstOrDefault(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, tableAttributeType));
+                if (tableAttribute == null || !done.Add(type)) continue;
 
-                var model = TableModel.Create(type, attr, keyAttr, context);
+                var model = TableModel.Create(type, tableAttribute, keyAttributeType, context);
                 if (model == null) continue;
 
                 var hint = type.ToDisplayString().Replace('.', '_') + ".OrdoTable.g.cs";
@@ -50,7 +50,7 @@ namespace OrdoMemory.Generator
 
             public void OnVisitSyntaxNode(SyntaxNode node)
             {
-                if (node is StructDeclarationSyntax s && s.AttributeLists.Count > 0) Candidates.Add(s);
+                if (node is StructDeclarationSyntax structDeclaration && structDeclaration.AttributeLists.Count > 0) Candidates.Add(structDeclaration);
             }
         }
     }

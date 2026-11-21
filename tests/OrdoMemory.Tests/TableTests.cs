@@ -16,20 +16,20 @@ namespace OrdoMemory.Tests
         public void InsertFindRemove()
         {
             var table = new ItemTable();
-            Assert.True(table.TryInsert(NewItem(1, "alice"), out var pk));
-            Assert.NotEqual(ItemTable.InvalidPk, pk);
+            Assert.True(table.TryInsert(NewItem(1, "alice"), out var primaryKey));
+            Assert.NotEqual(ItemTable.InvalidPrimaryKey, primaryKey);
 
-            Assert.True(table.TryFind(pk, out var row));
+            Assert.True(table.TryFind(primaryKey, out var row));
             Assert.Equal("alice", row.Name);
 
-            ref readonly var r = ref table.FindRef(pk, out var found);
+            ref readonly var r = ref table.FindRef(primaryKey, out var found);
             Assert.True(found);
             Assert.Equal(1, r.Code);
 
-            Assert.False(table.TryFind(ItemTable.InvalidPk, out _));
-            Assert.True(table.Remove(pk));
-            Assert.False(table.Remove(pk));
-            Assert.False(table.Contains(pk));
+            Assert.False(table.TryFind(ItemTable.InvalidPrimaryKey, out _));
+            Assert.True(table.Remove(primaryKey));
+            Assert.False(table.Remove(primaryKey));
+            Assert.False(table.Contains(primaryKey));
             Assert.Equal(0, table.Count);
             Assert.False(table.TryFindByCode(1, out _));
         }
@@ -53,23 +53,23 @@ namespace OrdoMemory.Tests
         public void RemoveMovesLastRecord()
         {
             var table = new ItemTable();
-            var pks = new uint[5];
-            for (var i = 0; i < 5; i++) table.TryInsert(NewItem(i), out pks[i]);
+            var primaryKeys = new uint[5];
+            for (var i = 0; i < 5; i++) table.TryInsert(NewItem(i), out primaryKeys[i]);
 
-            table.Remove(pks[1]);
+            table.Remove(primaryKeys[1]);
             for (var i = 0; i < 5; i++)
             {
                 if (i == 1) continue;
-                Assert.True(table.TryFind(pks[i], out var row));
+                Assert.True(table.TryFind(primaryKeys[i], out var row));
                 Assert.Equal(i, row.Code);
             }
 
             var seen = new List<(uint, int)>();
             foreach (var it in Enumerate(table)) seen.Add(it);
             Assert.Equal(new[] { 0, 2, 3, 4 }, seen.Select(s => s.Item2).OrderBy(x => x));
-            foreach (var (pk, code) in seen)
+            foreach (var (primaryKey, code) in seen)
             {
-                Assert.True(table.TryFind(pk, out var row));
+                Assert.True(table.TryFind(primaryKey, out var row));
                 Assert.Equal(code, row.Code);
             }
         }
@@ -78,7 +78,7 @@ namespace OrdoMemory.Tests
         {
             var list = new List<(uint, int)>();
             var e = table.All().GetEnumerator();
-            while (e.MoveNext()) list.Add((e.CurrentPk, e.Current.Code));
+            while (e.MoveNext()) list.Add((e.CurrentPrimaryKey, e.Current.Code));
             return list;
         }
 
@@ -88,7 +88,7 @@ namespace OrdoMemory.Tests
             var table = new ItemTable();
             Assert.True(table.TryInsert(NewItem(1, tag: "x"), out var a));
             Assert.False(table.TryInsert(NewItem(1, tag: "y"), out var dup));
-            Assert.Equal(ItemTable.InvalidPk, dup);
+            Assert.Equal(ItemTable.InvalidPrimaryKey, dup);
             Assert.False(table.TryInsert(NewItem(2, tag: "x"), out _));
             Assert.True(table.TryInsert(NewItem(2, tag: "y"), out var b));
 
@@ -110,16 +110,16 @@ namespace OrdoMemory.Tests
         public void UpdateOnlySpecifiedFields()
         {
             var table = new ItemTable();
-            table.TryInsert(NewItem(1, "a", Kind.B, "t", 1.5, "d"), out var pk);
-            Assert.True(table.Update(pk, description: null));
+            table.TryInsert(NewItem(1, "a", Kind.B, "t", 1.5, "d"), out var primaryKey);
+            Assert.True(table.Update(primaryKey, description: null));
 
-            table.TryFind(pk, out var row);
+            table.TryFind(primaryKey, out var row);
             Assert.Null(row.Description);
             Assert.Equal("a", row.Name);
             Assert.Equal(Kind.B, row.Kind);
             Assert.Equal(1.5, row.Score);
 
-            Assert.True(table.Update(pk, name: "b", kind: Kind.C));
+            Assert.True(table.Update(primaryKey, name: "b", kind: Kind.C));
             Assert.False(table.TryFindFirstByName("a", out _));
             Assert.True(table.TryFindFirstByName("b", out _));
             Assert.Equal(0, CountKind(table, Kind.B));
@@ -172,8 +172,8 @@ namespace OrdoMemory.Tests
         public void ModificationDuringEnumerationThrows()
         {
             var table = new ItemTable();
-            var pks = new uint[3];
-            for (var i = 0; i < 3; i++) table.TryInsert(NewItem(i), out pks[i]);
+            var primaryKeys = new uint[3];
+            for (var i = 0; i < 3; i++) table.TryInsert(NewItem(i), out primaryKeys[i]);
 
             Assert.Throws<InvalidOperationException>(() =>
             {
@@ -182,7 +182,7 @@ namespace OrdoMemory.Tests
 
             Assert.Throws<InvalidOperationException>(() =>
             {
-                foreach (ref readonly var r in table.FindRangeByCode(0, 1000)) table.Update(pks[0], code: r.Code + 1000);
+                foreach (ref readonly var r in table.FindRangeByCode(0, 1000)) table.Update(primaryKeys[0], code: r.Code + 1000);
             });
         }
 
@@ -191,13 +191,13 @@ namespace OrdoMemory.Tests
         {
             var table = new ItemTable();
             var rows = Enumerable.Range(0, 1000).Select(i => NewItem(i * 2, "n" + (i % 17), (Kind)(i % 3), score: i)).ToArray();
-            var pks = new uint[rows.Length];
-            Assert.True(table.TryBulkInsert(rows, pks));
+            var primaryKeys = new uint[rows.Length];
+            Assert.True(table.TryBulkInsert(rows, primaryKeys));
             Assert.Equal(1000, table.Count);
 
             var small = Enumerable.Range(0, 10).Select(i => NewItem(i * 2 + 1)).ToArray();
-            var smallPks = new uint[10];
-            Assert.True(table.TryBulkInsert(small, smallPks));
+            var smallPrimaryKeys = new uint[10];
+            Assert.True(table.TryBulkInsert(small, smallPrimaryKeys));
             Assert.Equal(1010, table.Count);
 
             var codes = new List<int>();
@@ -206,7 +206,7 @@ namespace OrdoMemory.Tests
 
             for (var i = 0; i < rows.Length; i++)
             {
-                Assert.True(table.TryFind(pks[i], out var row));
+                Assert.True(table.TryFind(primaryKeys[i], out var row));
                 Assert.Equal(i * 2, row.Code);
             }
         }
@@ -257,7 +257,7 @@ namespace OrdoMemory.Tests
         }
 
         [Fact]
-        public void UInt64Pk()
+        public void UInt64PrimaryKey()
         {
             var table = new BigTable();
             Assert.True(table.TryInsert(new BigRow(5, 1), out ulong a));
@@ -265,24 +265,24 @@ namespace OrdoMemory.Tests
             Assert.True(table.TryInsert(new BigRow(long.MinValue, 3), out _));
             Assert.Equal(1UL << 32, a & ~0xFFFFFFFFUL);
 
-            var pks = new List<ulong>();
+            var primaryKeys = new List<ulong>();
             foreach (ref readonly var _ in table.FindAllByValue(5)) { }
             var e = table.FindAllByValue(5).GetEnumerator();
-            while (e.MoveNext()) pks.Add(e.CurrentPk);
-            Assert.Equal(new[] { a, b }.OrderBy(x => x), pks);
+            while (e.MoveNext()) primaryKeys.Add(e.CurrentPrimaryKey);
+            Assert.Equal(new[] { a, b }.OrderBy(x => x), primaryKeys);
 
-            Assert.True(table.Update(a, pkValue: 10));
+            Assert.True(table.Update(a, primaryKeyValue: 10));
             Assert.True(table.TryFind(a, out var row));
-            Assert.Equal(10, row.Pk);
+            Assert.Equal(10, row.PrimaryKey);
         }
 
         [Fact]
         public void TrimExcessKeepsContents()
         {
             var table = new ItemTable(100);
-            var pks = new uint[50];
-            for (var i = 0; i < 50; i++) table.TryInsert(NewItem(i, "n" + (i % 5)), out pks[i]);
-            for (var i = 0; i < 50; i += 2) table.Remove(pks[i]);
+            var primaryKeys = new uint[50];
+            for (var i = 0; i < 50; i++) table.TryInsert(NewItem(i, "n" + (i % 5)), out primaryKeys[i]);
+            for (var i = 0; i < 50; i += 2) table.Remove(primaryKeys[i]);
 
             table.TrimExcess();
             Assert.Equal(25, table.Capacity);

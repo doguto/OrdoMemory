@@ -3,10 +3,10 @@ using System.Runtime.CompilerServices;
 
 namespace OrdoMemory
 {
-    public sealed class RowStore<TRow, TPk, TPkTraits>
+    public sealed class RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits>
         where TRow : struct
-        where TPk : unmanaged
-        where TPkTraits : struct, IPkTraits<TPk>
+        where TPrimaryKey : unmanaged
+        where TPrimaryKeyTraits : struct, IPrimaryKeyTraits<TPrimaryKey>
     {
         const int MinGrowLength = 4;
         const int MaxArrayLength = 0x7FFFFFC7;
@@ -14,13 +14,13 @@ namespace OrdoMemory
         struct Slot
         {
             public int Dense;
-            public uint Gen;
+            public uint Generation;
         }
 
         readonly int slotBits;
         readonly ulong slotMask;
         readonly int maxSlots;
-        readonly uint maxGen;
+        readonly uint maxGeneration;
 
         TRow[] dense;
         int[] denseToSlot;
@@ -35,13 +35,13 @@ namespace OrdoMemory
 
         public RowStore(int capacity, int slotBits)
         {
-            var genBits = default(TPkTraits).Bits - slotBits;
-            if (slotBits < 1 || genBits < 1 || genBits > 32) throw new ArgumentOutOfRangeException(nameof(slotBits));
+            var generationBits = default(TPrimaryKeyTraits).Bits - slotBits;
+            if (slotBits < 1 || generationBits < 1 || generationBits > 32) throw new ArgumentOutOfRangeException(nameof(slotBits));
 
             this.slotBits = slotBits;
             slotMask = (1UL << slotBits) - 1;
             maxSlots = slotBits >= 31 ? MaxArrayLength : 1 << slotBits;
-            maxGen = genBits == 32 ? uint.MaxValue : (1u << genBits) - 1;
+            maxGeneration = generationBits == 32 ? uint.MaxValue : (1u << generationBits) - 1;
 
             if (capacity < 0 || capacity > maxSlots) throw new ArgumentOutOfRangeException(nameof(capacity));
             dense = new TRow[capacity];
@@ -56,19 +56,19 @@ namespace OrdoMemory
         public int Version => version;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool TryGetIndex(TPk pk, out int index)
+        public bool TryGetIndex(TPrimaryKey primaryKey, out int index)
         {
-            var value = default(TPkTraits).ToUInt64(pk);
-            var gen = value >> slotBits;
+            var value = default(TPrimaryKeyTraits).ToUInt64(primaryKey);
+            var generation = value >> slotBits;
             var slot = value & slotMask;
-            if (gen == 0 || slot >= (ulong)slotCount)
+            if (generation == 0 || slot >= (ulong)slotCount)
             {
                 index = -1;
                 return false;
             }
 
             ref var s = ref slots[(int)slot];
-            if (s.Gen != gen)
+            if (s.Generation != generation)
             {
                 index = -1;
                 return false;
@@ -85,15 +85,15 @@ namespace OrdoMemory
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public int IndexOf(TPk pk)
+        public int IndexOf(TPrimaryKey primaryKey)
         {
-            return slots[(int)(default(TPkTraits).ToUInt64(pk) & slotMask)].Dense;
+            return slots[(int)(default(TPrimaryKeyTraits).ToUInt64(primaryKey) & slotMask)].Dense;
         }
 
-        public TPk PkAt(int index)
+        public TPrimaryKey PrimaryKeyAt(int index)
         {
             var slot = denseToSlot[index];
-            return MakePk(slots[slot].Gen, slot);
+            return MakePrimaryKey(slots[slot].Generation, slot);
         }
 
         public bool TryReserve(int required)
@@ -110,7 +110,7 @@ namespace OrdoMemory
             return true;
         }
 
-        public TPk Store(in TRow row)
+        public TPrimaryKey Store(in TRow row)
         {
             int slot;
             if (freeHead >= 0)
@@ -121,7 +121,7 @@ namespace OrdoMemory
             else
             {
                 slot = slotCount++;
-                slots[slot].Gen = 1;
+                slots[slot].Generation = 1;
             }
 
             dense[count] = row;
@@ -129,7 +129,7 @@ namespace OrdoMemory
             slots[slot].Dense = count;
             count++;
             version++;
-            return MakePk(slots[slot].Gen, slot);
+            return MakePrimaryKey(slots[slot].Generation, slot);
         }
 
         public void RemoveAt(int index)
@@ -147,15 +147,15 @@ namespace OrdoMemory
             count = last;
 
             ref var s = ref slots[slot];
-            if (s.Gen < maxGen)
+            if (s.Generation < maxGeneration)
             {
-                s.Gen++;
+                s.Generation++;
                 s.Dense = freeHead;
                 freeHead = slot;
             }
             else
             {
-                s.Gen = 0;
+                s.Generation = 0;
                 retired++;
             }
 
@@ -186,14 +186,14 @@ namespace OrdoMemory
             return new AllEnumerable(this);
         }
 
-        public IndexEnumerable<TInner> Enumerate<TInner>(TInner pks) where TInner : struct, IPkEnumerator<TPk>
+        public IndexEnumerable<TPrimaryKeyEnumerator> Enumerate<TPrimaryKeyEnumerator>(TPrimaryKeyEnumerator primaryKeys) where TPrimaryKeyEnumerator : struct, IPrimaryKeyEnumerator<TPrimaryKey>
         {
-            return new IndexEnumerable<TInner>(this, pks);
+            return new IndexEnumerable<TPrimaryKeyEnumerator>(this, primaryKeys);
         }
 
-        TPk MakePk(uint gen, int slot)
+        TPrimaryKey MakePrimaryKey(uint generation, int slot)
         {
-            return default(TPkTraits).FromUInt64(((ulong)gen << slotBits) | (uint)slot);
+            return default(TPrimaryKeyTraits).FromUInt64(((ulong)generation << slotBits) | (uint)slot);
         }
 
         void EnsureCapacity<T>(ref T[] array, int required)
@@ -210,9 +210,9 @@ namespace OrdoMemory
 
         public readonly struct AllEnumerable
         {
-            readonly RowStore<TRow, TPk, TPkTraits> store;
+            readonly RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits> store;
 
-            internal AllEnumerable(RowStore<TRow, TPk, TPkTraits> store)
+            internal AllEnumerable(RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits> store)
             {
                 this.store = store;
             }
@@ -225,11 +225,11 @@ namespace OrdoMemory
 
         public struct AllEnumerator
         {
-            readonly RowStore<TRow, TPk, TPkTraits> store;
+            readonly RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits> store;
             readonly int version;
             int index;
 
-            internal AllEnumerator(RowStore<TRow, TPk, TPkTraits> store)
+            internal AllEnumerator(RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits> store)
             {
                 this.store = store;
                 version = store.version;
@@ -238,7 +238,7 @@ namespace OrdoMemory
 
             public ref readonly TRow Current => ref store.dense[index];
 
-            public TPk CurrentPk => store.PkAt(index);
+            public TPrimaryKey CurrentPrimaryKey => store.PrimaryKeyAt(index);
 
             public bool MoveNext()
             {
@@ -247,49 +247,49 @@ namespace OrdoMemory
             }
         }
 
-        public readonly struct IndexEnumerable<TInner> where TInner : struct, IPkEnumerator<TPk>
+        public readonly struct IndexEnumerable<TPrimaryKeyEnumerator> where TPrimaryKeyEnumerator : struct, IPrimaryKeyEnumerator<TPrimaryKey>
         {
-            readonly RowStore<TRow, TPk, TPkTraits> store;
-            readonly TInner pks;
+            readonly RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits> store;
+            readonly TPrimaryKeyEnumerator primaryKeys;
             readonly int version;
 
-            internal IndexEnumerable(RowStore<TRow, TPk, TPkTraits> store, TInner pks)
+            internal IndexEnumerable(RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits> store, TPrimaryKeyEnumerator primaryKeys)
             {
                 this.store = store;
-                this.pks = pks;
+                this.primaryKeys = primaryKeys;
                 version = store.version;
             }
 
-            public IndexEnumerator<TInner> GetEnumerator()
+            public IndexEnumerator<TPrimaryKeyEnumerator> GetEnumerator()
             {
-                return new IndexEnumerator<TInner>(store, pks, version);
+                return new IndexEnumerator<TPrimaryKeyEnumerator>(store, primaryKeys, version);
             }
         }
 
-        public struct IndexEnumerator<TInner> where TInner : struct, IPkEnumerator<TPk>
+        public struct IndexEnumerator<TPrimaryKeyEnumerator> where TPrimaryKeyEnumerator : struct, IPrimaryKeyEnumerator<TPrimaryKey>
         {
-            readonly RowStore<TRow, TPk, TPkTraits> store;
+            readonly RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits> store;
             readonly int version;
-            TInner pks;
+            TPrimaryKeyEnumerator primaryKeys;
             int index;
 
-            internal IndexEnumerator(RowStore<TRow, TPk, TPkTraits> store, TInner pks, int version)
+            internal IndexEnumerator(RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits> store, TPrimaryKeyEnumerator primaryKeys, int version)
             {
                 this.store = store;
-                this.pks = pks;
+                this.primaryKeys = primaryKeys;
                 this.version = version;
                 index = -1;
             }
 
             public ref readonly TRow Current => ref store.dense[index];
 
-            public TPk CurrentPk => pks.Current;
+            public TPrimaryKey CurrentPrimaryKey => primaryKeys.Current;
 
             public bool MoveNext()
             {
                 store.CheckVersion(version);
-                if (!pks.MoveNext()) return false;
-                index = store.IndexOf(pks.Current);
+                if (!primaryKeys.MoveNext()) return false;
+                index = store.IndexOf(primaryKeys.Current);
                 return true;
             }
         }

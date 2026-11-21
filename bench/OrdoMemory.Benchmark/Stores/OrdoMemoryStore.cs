@@ -11,15 +11,15 @@ namespace OrdoMemory.Benchmark.Stores
             var items = new OrdoItem[rows.Length];
             for (var i = 0; i < rows.Length; i++) items[i] = ToItem(rows[i]);
 
-            var pks = new uint[rows.Length];
-            if (!table.TryBulkInsert(items, pks)) throw new InvalidOperationException("bulk insert failed");
-            for (var i = 0; i < pks.Length; i++) keys[i] = pks[i];
+            var primaryKeys = new uint[rows.Length];
+            if (!table.TryBulkInsert(items, primaryKeys)) throw new InvalidOperationException("bulk insert failed");
+            for (var i = 0; i < primaryKeys.Length; i++) keys[i] = primaryKeys[i];
         }
 
         public long Insert(in ItemData row)
         {
-            if (!table.TryInsert(ToItem(row), out var pk)) throw new InvalidOperationException("insert failed");
-            return pk;
+            if (!table.TryInsert(ToItem(row), out var primaryKey)) throw new InvalidOperationException("insert failed");
+            return primaryKey;
         }
 
         public bool TryFind(long key, out ItemData row)

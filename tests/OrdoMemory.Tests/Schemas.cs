@@ -28,13 +28,13 @@ namespace OrdoMemory.Tests
         public readonly string Description;
     }
 
-    [OrdoTable(Pk = PkKind.UInt64, TableName = "BigTable")]
+    [OrdoTable(PrimaryKey = PrimaryKeyKind.UInt64, TableName = "BigTable")]
     public readonly partial struct BigRow
     {
         [SecondaryKey(Unique = false)]
         public readonly long Value;
 
-        public readonly int Pk;
+        public readonly int PrimaryKey;
     }
 
     [OrdoTable(SlotBits = 31)]

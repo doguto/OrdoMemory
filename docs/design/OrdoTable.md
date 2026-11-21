@@ -42,7 +42,7 @@ int count;
 struct Slot
 {
     public int Dense;  // 使用中: dense の位置 / 空き: 次の空きスロット (空きリスト)
-    public uint Gen;   // 世代. 1 から始め、スロットを再利用するたびに進める. 0 は未使用 / 使用停止
+    public uint Generation;   // 世代. 1 から始め、スロットを再利用するたびに進める. 0 は未使用 / 使用停止
 }
 Slot[] slots;
 
@@ -54,7 +54,7 @@ int freeHead;
 ```
 
 - `Slot` は 1 つの struct にまとめ、Find で触るキャッシュラインを 1 本にする.
-- Record (Row) は PK を持たない. PK が必要な場合は、列挙子の `CurrentPk` か `denseToSlot` と `slots` から求める.
+- Record (Row) は PK を持たない. PK が必要な場合は、列挙子の `CurrentPrimaryKey` か `denseToSlot` と `slots` から求める.
 
 ### Record
 
@@ -72,7 +72,7 @@ int freeHead;
 PK は DB 側で払い出す.
 
 ```
-PK = (Gen << SlotBits) | Slot
+PK = (Generation << SlotBits) | Slot
 ```
 
 ### 対応する型
@@ -89,13 +89,13 @@ PK は符号なし整数とする. 符号ビットも世代に使え、`>>` が�
 
 ### 無効値
 
-- 世代は 1 から始める. そのため PK = 0 は払い出されず、`default` の PK がそのまま無効値 (`InvalidPk`) になる.
+- 世代は 1 から始める. そのため PK = 0 は払い出されず、`default` の PK がそのまま無効値 (`InvalidPrimaryKey`) になる.
   - 代入し忘れた PK が、スロット 0 の Record を静かに指す事故を防ぐため.
-- スロットの `Gen = 0` は「未使用 / 使用停止」を表す. 世代 0 の PK は Find で弾くため、どの PK とも一致しない.
+- スロットの `Generation = 0` は「未使用 / 使用停止」を表す. 世代 0 の PK は Find で弾くため、どの PK とも一致しない.
 
 ### 世代の一周
 
-- 世代が最大値に達したスロットは、`Gen = 0` にして空きリストに戻さず、使用を止める.
+- 世代が最大値に達したスロットは、`Generation = 0` にして空きリストに戻さず、使用を止める.
   - 古いハンドルが、同じスロットを再利用した別の Record を指す事故 (ABA) を防ぐため.
   - 使用を止めたスロットは 1 つにつき 8B を消費し続ける.
 - スロットを使い切った場合、Insert を失敗させる.
@@ -107,22 +107,22 @@ PK は符号なし整数とする. 符号ビットも世代に使え、`>>` が�
 ### Find (PK から Record の解決)
 
 ```csharp
-var gen = pk >> SlotBits;
-var slot = pk & SlotMask;
-if (gen == 0 || slot >= (uint)slotCount) return miss;   // 無効値 / 使用停止との一致を弾く
+var generation = primaryKey >> SlotBits;
+var slot = primaryKey & SlotMask;
+if (generation == 0 || slot >= (uint)slotCount) return miss;   // 無効値 / 使用停止との一致を弾く
 ref var s = ref slots[slot];
-if (s.Gen != gen) return miss;               // 削除済み / 再利用済み
+if (s.Generation != generation) return miss;               // 削除済み / 再利用済み
 return ref dense[s.Dense];
 ```
 
-- 空きスロットの `Gen` は Remove の時点で進めてあるため、削除済みの PK は世代の比較で弾かれる.
+- 空きスロットの `Generation` は Remove の時点で進めてあるため、削除済みの PK は世代の比較で弾かれる.
 
 ### Insert
 
-1. 空きリストの先頭からスロットを取る. 無ければ `slotCount` 番目を新しく使い、`Gen = 1` とする.
+1. 空きリストの先頭からスロットを取る. 無ければ `slotCount` 番目を新しく使い、`Generation = 1` とする.
    - 直前に空いたスロットから使うため、キャッシュに乗っていることが多い.
 2. `dense[count]` に書き込み、`denseToSlot[count] = slot`、`slots[slot].Dense = count` とする.
-3. PK = `(Gen << SlotBits) | slot` を返す.
+3. PK = `(Generation << SlotBits) | slot` を返す.
 
 ### BulkInsert
 
@@ -233,16 +233,16 @@ MySQL (InnoDB) の二次索引と同様に、B+Tree のキーを `(SecondaryKey,
 ```csharp
 public sealed class SampleTable
 {
-    public const uint InvalidPk = 0;
+    public const uint InvalidPrimaryKey = 0;
 
-    public bool TryInsert(in SampleRow row, out uint pk);
-    public bool TryBulkInsert(ReadOnlySpan<SampleRow> rows, Span<uint> pks);
+    public bool TryInsert(in SampleRow row, out uint primaryKey);
+    public bool TryBulkInsert(ReadOnlySpan<SampleRow> rows, Span<uint> primaryKeys);
 
-    public bool TryFind(uint pk, out SampleRow row);
-    public ref readonly SampleRow FindRef(uint pk, out bool found);
+    public bool TryFind(uint primaryKey, out SampleRow row);
+    public ref readonly SampleRow FindRef(uint primaryKey, out bool found);
 
-    public bool Update(uint pk, Optional<string> name = default, Optional<string> description = default);
-    public bool Remove(uint pk);
+    public bool Update(uint primaryKey, Optional<string> name = default, Optional<string> description = default);
+    public bool Remove(uint primaryKey);
 
     public AllEnumerable All();
     public bool TryFindFirstByName(string name, out SampleRow row);

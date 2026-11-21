@@ -10,50 +10,50 @@ namespace OrdoMemory.Tests
         sealed class Model<TKey>
         {
             readonly IComparer<TKey> comparer;
-            public readonly List<(TKey Key, ulong Pk)> Entries = new List<(TKey, ulong)>();
+            public readonly List<(TKey Key, ulong PrimaryKey)> Entries = new List<(TKey, ulong)>();
 
             public Model(IComparer<TKey> comparer)
             {
                 this.comparer = comparer;
             }
 
-            int Compare((TKey Key, ulong Pk) a, (TKey Key, ulong Pk) b)
+            int Compare((TKey Key, ulong PrimaryKey) a, (TKey Key, ulong PrimaryKey) b)
             {
                 var c = comparer.Compare(a.Key, b.Key);
-                return c != 0 ? c : a.Pk.CompareTo(b.Pk);
+                return c != 0 ? c : a.PrimaryKey.CompareTo(b.PrimaryKey);
             }
 
-            public void Add(TKey key, ulong pk)
+            public void Add(TKey key, ulong primaryKey)
             {
-                Entries.Add((key, pk));
+                Entries.Add((key, primaryKey));
                 Entries.Sort(Compare);
             }
 
             public IEnumerable<ulong> Range(TKey min, TKey max)
             {
-                return Entries.Where(e => comparer.Compare(e.Key, min) >= 0 && comparer.Compare(e.Key, max) <= 0).Select(e => e.Pk);
+                return Entries.Where(e => comparer.Compare(e.Key, min) >= 0 && comparer.Compare(e.Key, max) <= 0).Select(e => e.PrimaryKey);
             }
         }
 
-        static List<ulong> Collect<TKey, TKT, TPk, TPT>(OrderedIndex<TKey, TKT, TPk, TPT>.RangeEnumerator e)
+        static List<ulong> Collect<TKey, TKT, TPrimaryKey, TPT>(OrderedIndex<TKey, TKT, TPrimaryKey, TPT>.RangeEnumerator e)
             where TKT : struct, IOrderedKeyTraits<TKey>
-            where TPk : unmanaged
-            where TPT : struct, IPkTraits<TPk>
+            where TPrimaryKey : unmanaged
+            where TPT : struct, IPrimaryKeyTraits<TPrimaryKey>
         {
             var list = new List<ulong>();
             while (e.MoveNext()) list.Add(default(TPT).ToUInt64(e.Current));
             return list;
         }
 
-        static void RunRandom<TKey, TKT, TPk, TPT>(bool unique, Func<Random, TKey> nextKey, IComparer<TKey> comparer, int seed)
+        static void RunRandom<TKey, TKT, TPrimaryKey, TPT>(bool unique, Func<Random, TKey> nextKey, IComparer<TKey> comparer, int seed)
             where TKT : struct, IOrderedKeyTraits<TKey>
-            where TPk : unmanaged
-            where TPT : struct, IPkTraits<TPk>
+            where TPrimaryKey : unmanaged
+            where TPT : struct, IPrimaryKeyTraits<TPrimaryKey>
         {
             var rnd = new Random(seed);
-            var index = new OrderedIndex<TKey, TKT, TPk, TPT>(unique, nodeSize: 4);
+            var index = new OrderedIndex<TKey, TKT, TPrimaryKey, TPT>(unique, nodeSize: 4);
             var model = new Model<TKey>(comparer);
-            ulong nextPk = 1;
+            ulong nextPrimaryKey = 1;
             var traits = default(TPT);
 
             for (var step = 0; step < 4000; step++)
@@ -62,35 +62,35 @@ namespace OrdoMemory.Tests
                 if (op < 5 || model.Entries.Count == 0)
                 {
                     var key = nextKey(rnd);
-                    var pk = nextPk++;
+                    var primaryKey = nextPrimaryKey++;
                     var exists = unique && model.Entries.Any(e => comparer.Compare(e.Key, key) == 0);
-                    Assert.Equal(!exists, index.Insert(key, traits.FromUInt64(pk)));
-                    if (!exists) model.Add(key, pk);
+                    Assert.Equal(!exists, index.Insert(key, traits.FromUInt64(primaryKey)));
+                    if (!exists) model.Add(key, primaryKey);
                 }
                 else if (op < 8)
                 {
                     var victim = model.Entries[rnd.Next(model.Entries.Count)];
-                    Assert.True(index.Remove(victim.Key, traits.FromUInt64(victim.Pk)));
-                    Assert.False(index.Remove(victim.Key, traits.FromUInt64(victim.Pk)));
+                    Assert.True(index.Remove(victim.Key, traits.FromUInt64(victim.PrimaryKey)));
+                    Assert.False(index.Remove(victim.Key, traits.FromUInt64(victim.PrimaryKey)));
                     model.Entries.Remove(victim);
                 }
                 else if (op < 9)
                 {
                     var k = rnd.Next(1, 40);
                     var keys = new TKey[k];
-                    var pks = new TPk[k];
+                    var primaryKeys = new TPrimaryKey[k];
                     for (var i = 0; i < k; i++)
                     {
                         keys[i] = nextKey(rnd);
-                        pks[i] = traits.FromUInt64(nextPk++);
+                        primaryKeys[i] = traits.FromUInt64(nextPrimaryKey++);
                     }
 
                     var conflict = unique && (keys.Distinct(new EqComparer<TKey>(comparer)).Count() != k
                         || keys.Any(key => model.Entries.Any(e => comparer.Compare(e.Key, key) == 0)));
-                    Assert.Equal(!conflict, index.AddRange(keys, pks));
+                    Assert.Equal(!conflict, index.AddRange(keys, primaryKeys));
                     if (!conflict)
                     {
-                        for (var i = 0; i < k; i++) model.Add(keys[i], traits.ToUInt64(pks[i]));
+                        for (var i = 0; i < k; i++) model.Add(keys[i], traits.ToUInt64(primaryKeys[i]));
                     }
                 }
                 else if (step % 50 == 0)
@@ -110,12 +110,12 @@ namespace OrdoMemory.Tests
 
             foreach (var e in model.Entries.ToList())
             {
-                Assert.True(index.Remove(e.Key, traits.FromUInt64(e.Pk)));
+                Assert.True(index.Remove(e.Key, traits.FromUInt64(e.PrimaryKey)));
                 model.Entries.Remove(e);
             }
 
             Assert.Equal(0, index.Count);
-            Assert.True(index.Insert(nextKey(rnd), traits.FromUInt64(nextPk)));
+            Assert.True(index.Insert(nextKey(rnd), traits.FromUInt64(nextPrimaryKey)));
         }
 
         sealed class EqComparer<T> : IEqualityComparer<T>
@@ -137,33 +137,33 @@ namespace OrdoMemory.Tests
         [Theory]
         [InlineData(1)]
         [InlineData(2)]
-        public void IntPacked(int seed) => RunRandom<int, Int32Key, uint, UInt32Pk>(false, r => r.Next(-50, 50), Comparer<int>.Default, seed);
+        public void IntPacked(int seed) => RunRandom<int, Int32Key, uint, UInt32PrimaryKey>(false, r => r.Next(-50, 50), Comparer<int>.Default, seed);
 
         [Theory]
         [InlineData(3)]
         [InlineData(4)]
-        public void IntUnique(int seed) => RunRandom<int, Int32Key, uint, UInt32Pk>(true, r => r.Next(-300, 300), Comparer<int>.Default, seed);
+        public void IntUnique(int seed) => RunRandom<int, Int32Key, uint, UInt32PrimaryKey>(true, r => r.Next(-300, 300), Comparer<int>.Default, seed);
 
         [Theory]
         [InlineData(5)]
-        public void IntWithUInt64Pk(int seed) => RunRandom<int, Int32Key, ulong, UInt64Pk>(false, r => r.Next(-50, 50), Comparer<int>.Default, seed);
+        public void IntWithUInt64Pk(int seed) => RunRandom<int, Int32Key, ulong, UInt64PrimaryKey>(false, r => r.Next(-50, 50), Comparer<int>.Default, seed);
 
         [Theory]
         [InlineData(6)]
-        public void LongNonUnique(int seed) => RunRandom<long, Int64Key, uint, UInt32Pk>(false, r => r.Next(-50, 50) * (long)uint.MaxValue, Comparer<long>.Default, seed);
+        public void LongNonUnique(int seed) => RunRandom<long, Int64Key, uint, UInt32PrimaryKey>(false, r => r.Next(-50, 50) * (long)uint.MaxValue, Comparer<long>.Default, seed);
 
         [Theory]
         [InlineData(7)]
         [InlineData(8)]
-        public void StringNonUnique(int seed) => RunRandom<string, StringKey, uint, UInt32Pk>(false, RandomString, StringComparer.Ordinal, seed);
+        public void StringNonUnique(int seed) => RunRandom<string, StringKey, uint, UInt32PrimaryKey>(false, RandomString, StringComparer.Ordinal, seed);
 
         [Theory]
         [InlineData(9)]
-        public void StringUnique(int seed) => RunRandom<string, StringKey, uint, UInt32Pk>(true, RandomString, StringComparer.Ordinal, seed);
+        public void StringUnique(int seed) => RunRandom<string, StringKey, uint, UInt32PrimaryKey>(true, RandomString, StringComparer.Ordinal, seed);
 
         [Theory]
         [InlineData(10)]
-        public void DoubleNonUnique(int seed) => RunRandom<double, DoubleKey, uint, UInt32Pk>(false, r => KeyConvert.Double(Math.Round(r.NextDouble() * 20 - 10, 1)), Comparer<double>.Default, seed);
+        public void DoubleNonUnique(int seed) => RunRandom<double, DoubleKey, uint, UInt32PrimaryKey>(false, r => KeyConvert.Double(Math.Round(r.NextDouble() * 20 - 10, 1)), Comparer<double>.Default, seed);
 
         [Fact]
         public void DoubleNormalizationOrder()
@@ -191,8 +191,8 @@ namespace OrdoMemory.Tests
             Assert.Equal(2u, e.Current);
             Assert.False(e.MoveNext());
 
-            Assert.True(index.TryGetFirst(null, out var pk));
-            Assert.Equal(3u, pk);
+            Assert.True(index.TryGetFirst(null, out var primaryKey));
+            Assert.Equal(3u, primaryKey);
             Assert.True(index.Remove(null, 3));
             Assert.False(index.ContainsKey(null));
             Assert.True(index.Remove("a", 2));

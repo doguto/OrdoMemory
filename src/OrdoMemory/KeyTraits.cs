@@ -6,9 +6,9 @@ namespace OrdoMemory
 {
     public interface IOrderedKeyTraits<TKey>
     {
-        int NormBits { get; }
+        int NormalizedBits { get; }
 
-        bool NeedsFull { get; }
+        bool NeedsFullComparison { get; }
 
         ulong Normalize(TKey key);
 
@@ -17,8 +17,8 @@ namespace OrdoMemory
 
     public readonly struct Int32Key : IOrderedKeyTraits<int>
     {
-        public int NormBits => 32;
-        public bool NeedsFull => false;
+        public int NormalizedBits => 32;
+        public bool NeedsFullComparison => false;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ulong Normalize(int key) => (uint)(key ^ int.MinValue);
@@ -28,8 +28,8 @@ namespace OrdoMemory
 
     public readonly struct Int64Key : IOrderedKeyTraits<long>
     {
-        public int NormBits => 64;
-        public bool NeedsFull => false;
+        public int NormalizedBits => 64;
+        public bool NeedsFullComparison => false;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ulong Normalize(long key) => (ulong)(key ^ long.MinValue);
@@ -39,8 +39,8 @@ namespace OrdoMemory
 
     public readonly struct UInt64Key : IOrderedKeyTraits<ulong>
     {
-        public int NormBits => 64;
-        public bool NeedsFull => false;
+        public int NormalizedBits => 64;
+        public bool NeedsFullComparison => false;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ulong Normalize(ulong key) => key;
@@ -52,8 +52,8 @@ namespace OrdoMemory
     {
         const ulong SignBit = 1UL << 63;
 
-        public int NormBits => 64;
-        public bool NeedsFull => false;
+        public int NormalizedBits => 64;
+        public bool NeedsFullComparison => false;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ulong Normalize(double key)
@@ -67,8 +67,8 @@ namespace OrdoMemory
 
     public readonly struct StringKey : IOrderedKeyTraits<string>
     {
-        public int NormBits => 64;
-        public bool NeedsFull => true;
+        public int NormalizedBits => 64;
+        public bool NeedsFullComparison => true;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ulong Normalize(string key)

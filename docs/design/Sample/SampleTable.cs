@@ -11,12 +11,12 @@ namespace OrdoMemory.Sample
         const uint MaxGen = (1u << (32 - SlotBits)) - 1;
         const int MinGrowLength = 4;
 
-        public const uint InvalidPk = 0;
+        public const uint InvalidPrimaryKey = 0;
 
         struct Slot
         {
             public int Dense;
-            public uint Gen;
+            public uint Generation;
         }
 
         SampleRow[] dense;
@@ -47,38 +47,38 @@ namespace OrdoMemory.Sample
             slots = new Slot[capacity];
         }
 
-        public bool TryInsert(in SampleRow row, out uint pk)
+        public bool TryInsert(in SampleRow row, out uint primaryKey)
         {
             if (!TryReserve(1))
             {
-                pk = InvalidPk;
+                primaryKey = InvalidPrimaryKey;
                 return false;
             }
 
-            pk = Store(row);
-            nameIndex.Insert(row.Name, pk);
+            primaryKey = Store(row);
+            nameIndex.Insert(row.Name, primaryKey);
             return true;
         }
 
-        public bool TryBulkInsert(ReadOnlySpan<SampleRow> rows, Span<uint> pks)
+        public bool TryBulkInsert(ReadOnlySpan<SampleRow> rows, Span<uint> primaryKeys)
         {
-            if (pks.Length < rows.Length) throw new ArgumentException("pks is shorter than rows.", nameof(pks));
+            if (primaryKeys.Length < rows.Length) throw new ArgumentException("primaryKeys is shorter than rows.", nameof(primaryKeys));
             if (!TryReserve(rows.Length)) return false;
 
             var entries = new KeyValuePair<string, uint>[rows.Length];
             for (var i = 0; i < rows.Length; i++)
             {
-                pks[i] = Store(rows[i]);
-                entries[i] = new KeyValuePair<string, uint>(rows[i].Name, pks[i]);
+                primaryKeys[i] = Store(rows[i]);
+                entries[i] = new KeyValuePair<string, uint>(rows[i].Name, primaryKeys[i]);
             }
 
             nameIndex.AddRange(entries);
             return true;
         }
 
-        public bool TryFind(uint pk, out SampleRow row)
+        public bool TryFind(uint primaryKey, out SampleRow row)
         {
-            if (TryGetDense(pk, out var index))
+            if (TryGetDense(primaryKey, out var index))
             {
                 row = dense[index];
                 return true;
@@ -88,35 +88,35 @@ namespace OrdoMemory.Sample
             return false;
         }
 
-        public ref readonly SampleRow FindRef(uint pk, out bool found)
+        public ref readonly SampleRow FindRef(uint primaryKey, out bool found)
         {
-            found = TryGetDense(pk, out var index);
+            found = TryGetDense(primaryKey, out var index);
             return ref found ? ref dense[index] : ref NotFound;
         }
 
         static readonly SampleRow NotFound = default;
 
-        public bool Update(uint pk, Optional<string> name = default, Optional<string> description = default)
+        public bool Update(uint primaryKey, Optional<string> name = default, Optional<string> description = default)
         {
-            if (!TryGetDense(pk, out var index)) return false;
+            if (!TryGetDense(primaryKey, out var index)) return false;
 
             var current = dense[index];
             var newName = name.OrElse(current.Name);
             if (!string.Equals(current.Name, newName, StringComparison.Ordinal))
             {
-                nameIndex.Remove(current.Name, pk);
-                nameIndex.Insert(newName, pk);
+                nameIndex.Remove(current.Name, primaryKey);
+                nameIndex.Insert(newName, primaryKey);
             }
 
             dense[index] = new SampleRow(newName, description.OrElse(current.Description));
             return true;
         }
 
-        public bool Remove(uint pk)
+        public bool Remove(uint primaryKey)
         {
-            if (!TryGetDense(pk, out var index)) return false;
+            if (!TryGetDense(primaryKey, out var index)) return false;
 
-            nameIndex.Remove(dense[index].Name, pk);
+            nameIndex.Remove(dense[index].Name, primaryKey);
 
             var last = count - 1;
             if (index != last)
@@ -129,17 +129,17 @@ namespace OrdoMemory.Sample
             dense[last] = default;
             count = last;
 
-            var slot = (int)(pk & SlotMask);
+            var slot = (int)(primaryKey & SlotMask);
             ref var s = ref slots[slot];
-            if (s.Gen < MaxGen)
+            if (s.Generation < MaxGen)
             {
-                s.Gen++;
+                s.Generation++;
                 s.Dense = freeHead;
                 freeHead = slot;
             }
             else
             {
-                s.Gen = 0;
+                s.Generation = 0;
                 retired++;
             }
 
@@ -154,7 +154,7 @@ namespace OrdoMemory.Sample
 
         public bool TryFindFirstByName(string name, out SampleRow row)
         {
-            foreach (var pk in nameIndex.Equal(name)) return TryFind(pk, out row);
+            foreach (var primaryKey in nameIndex.Equal(name)) return TryFind(primaryKey, out row);
 
             row = default;
             return false;
@@ -207,7 +207,7 @@ namespace OrdoMemory.Sample
 
             public ref readonly SampleRow Current => ref table.dense[index];
 
-            public uint CurrentPk => table.PkOf(index);
+            public uint CurrentPrimaryKey => table.PrimaryKeyOf(index);
 
             public bool MoveNext()
             {
@@ -219,41 +219,41 @@ namespace OrdoMemory.Sample
         public readonly struct NameEnumerable
         {
             readonly SampleTable table;
-            readonly IEnumerable<uint> pks;
+            readonly IEnumerable<uint> primaryKeys;
 
-            internal NameEnumerable(SampleTable table, IEnumerable<uint> pks)
+            internal NameEnumerable(SampleTable table, IEnumerable<uint> primaryKeys)
             {
                 this.table = table;
-                this.pks = pks;
+                this.primaryKeys = primaryKeys;
             }
 
             public NameEnumerator GetEnumerator()
             {
-                return new NameEnumerator(table, pks.GetEnumerator());
+                return new NameEnumerator(table, primaryKeys.GetEnumerator());
             }
         }
 
         public struct NameEnumerator
         {
             readonly SampleTable table;
-            readonly IEnumerator<uint> pks;
+            readonly IEnumerator<uint> primaryKeys;
             int index;
 
-            internal NameEnumerator(SampleTable table, IEnumerator<uint> pks)
+            internal NameEnumerator(SampleTable table, IEnumerator<uint> primaryKeys)
             {
                 this.table = table;
-                this.pks = pks;
+                this.primaryKeys = primaryKeys;
                 index = -1;
             }
 
             public ref readonly SampleRow Current => ref table.dense[index];
 
-            public uint CurrentPk => pks.Current;
+            public uint CurrentPrimaryKey => primaryKeys.Current;
 
             public bool MoveNext()
             {
-                if (!pks.MoveNext()) return false;
-                index = table.slots[(int)(pks.Current & SlotMask)].Dense;
+                if (!primaryKeys.MoveNext()) return false;
+                index = table.slots[(int)(primaryKeys.Current & SlotMask)].Dense;
                 return true;
             }
         }
@@ -281,7 +281,7 @@ namespace OrdoMemory.Sample
             else
             {
                 slot = slotCount++;
-                slots[slot].Gen = 1;
+                slots[slot].Generation = 1;
             }
 
             dense[count] = row;
@@ -289,14 +289,14 @@ namespace OrdoMemory.Sample
             slots[slot].Dense = count;
             count++;
             version++;
-            return MakePk(slots[slot].Gen, slot);
+            return MakePrimaryKey(slots[slot].Generation, slot);
         }
 
-        bool TryGetDense(uint pk, out int index)
+        bool TryGetDense(uint primaryKey, out int index)
         {
-            var gen = pk >> SlotBits;
-            var slot = pk & SlotMask;
-            if (gen == 0 || slot >= (uint)slotCount || slots[slot].Gen != gen)
+            var generation = primaryKey >> SlotBits;
+            var slot = primaryKey & SlotMask;
+            if (generation == 0 || slot >= (uint)slotCount || slots[slot].Generation != generation)
             {
                 index = -1;
                 return false;
@@ -306,15 +306,15 @@ namespace OrdoMemory.Sample
             return true;
         }
 
-        uint PkOf(int index)
+        uint PrimaryKeyOf(int index)
         {
             var slot = denseToSlot[index];
-            return MakePk(slots[slot].Gen, slot);
+            return MakePrimaryKey(slots[slot].Generation, slot);
         }
 
-        static uint MakePk(uint gen, int slot)
+        static uint MakePrimaryKey(uint generation, int slot)
         {
-            return (gen << SlotBits) | (uint)slot;
+            return (generation << SlotBits) | (uint)slot;
         }
 
         static void EnsureCapacity<T>(ref T[] array, int required)
