@@ -1,6 +1,6 @@
 # OrdoMemory ベンチマーク
 
-RuntimeTable (`docs/design/RuntimeTable.md`) を、他の組み込み DB / インメモリ DB と同じ操作で比較する.
+OrdoTable (`docs/design/OrdoTable.md`) を、他の組み込み DB / インメモリ DB と同じ操作で比較する.
 計測は BenchmarkDotNet で行う.
 
 ## 実行
@@ -33,7 +33,7 @@ BenchmarkDotNet の `Params` はコマンドラインから変えられないた
 
 | Target | 内容 |
 |---|---|
-| `OrdoMemory` | 本ライブラリ (`[RuntimeTable]` から生成したテーブル) |
+| `OrdoMemory` | 本ライブラリ (`[OrdoTable]` から生成したテーブル) |
 | `Dictionary` | BCL だけで素直に書いた基準. `Dictionary` + 索引ごとの `Dictionary` / `HashSet` / `SortedSet` |
 | `MasterMemory` | Cysharp/MasterMemory 3. 読み取り専用の不変 DB. 書き込みは `ImmutableBuilder` で全体を作り直す |
 | `Sqlite` / `SqliteInMemory` | Microsoft.Data.Sqlite (ADO.NET). 準備済みのコマンドを使い回す |

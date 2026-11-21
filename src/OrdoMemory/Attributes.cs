@@ -18,7 +18,7 @@ namespace OrdoMemory
     /// readonly partial struct に付けると、コンストラクタと {Struct}Table を生成する.
     /// </summary>
     [AttributeUsage(AttributeTargets.Struct, Inherited = false)]
-    public sealed class RuntimeTableAttribute : Attribute
+    public sealed class OrdoTableAttribute : Attribute
     {
         /// <summary>生成するテーブルの型名. 省略時は {Struct}Table.</summary>
         public string TableName { get; set; }

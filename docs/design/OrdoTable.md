@@ -1,7 +1,7 @@
-# Runtimeテーブル設計
+# OrdoTable 設計
 
 ゲーム実行中に Insert / Update / Remove が繰り返されるテーブルの設計. 対象環境は Unity (netstandard2.1 / C# 9 / Mono・IL2CPP).
-メモリ効率とパフォーマンスを最優先とする. 構造の選定根拠は `RuntimeTable.Benchmark.md`、サンプル実装は `Sample/`.
+メモリ効率とパフォーマンスを最優先とする. 構造の選定根拠は `OrdoTable.Benchmark.md`、サンプル実装は `Sample/`.
 
 ## 要件
 

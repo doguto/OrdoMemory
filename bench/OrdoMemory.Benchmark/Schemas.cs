@@ -5,7 +5,7 @@ using MessagePack;
 
 namespace OrdoMemory.Benchmark
 {
-    [RuntimeTable]
+    [OrdoTable]
     public readonly partial struct OrdoItem
     {
         [SecondaryKey]

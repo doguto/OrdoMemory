@@ -10,7 +10,7 @@
 
   <ItemGroup>
     <!-- Benchmark が、比較用テーブルから SampleSchema.Id を設定するため -->
-    <InternalsVisibleTo Include="RuntimeTableBenchmark" />
+    <InternalsVisibleTo Include="OrdoTableBenchmark" />
   </ItemGroup>
 
   <ItemGroup>
