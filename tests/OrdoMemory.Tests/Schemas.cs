@@ -7,7 +7,7 @@ namespace OrdoMemory.Tests
         C,
     }
 
-    [RuntimeTable]
+    [OrdoTable]
     public readonly partial struct Item
     {
         [SecondaryKey]
@@ -28,7 +28,7 @@ namespace OrdoMemory.Tests
         public readonly string Description;
     }
 
-    [RuntimeTable(Pk = PkKind.UInt64, TableName = "BigTable")]
+    [OrdoTable(Pk = PkKind.UInt64, TableName = "BigTable")]
     public readonly partial struct BigRow
     {
         [SecondaryKey(Unique = false)]
@@ -38,14 +38,14 @@ namespace OrdoMemory.Tests
     }
 
     // 世代 1bit: 1 度削除したスロットは使用を止める.
-    [RuntimeTable(SlotBits = 31)]
+    [OrdoTable(SlotBits = 31)]
     public readonly partial struct OneGenRow
     {
         public readonly int Value;
     }
 
     // スロット 2bit: 同時に 4 件まで.
-    [RuntimeTable(SlotBits = 2)]
+    [OrdoTable(SlotBits = 2)]
     public readonly partial struct TinyRow
     {
         [SecondaryKey]

@@ -1,7 +1,7 @@
-# Runtimeテーブル データ構造の比較結果
+# OrdoTable データ構造の比較結果
 
-Runtimeテーブル (`RuntimeTable.md`) のデータ構造の候補を同じ条件で実装・計測し、採用する構造を決める.
-コードと再現手順は、コミット `16a2957` の `bench/RuntimeTableBench/` (`git show 16a2957:bench/RuntimeTableBench/README.md`). 生の結果 (全指標) は同コミットの `bench/RuntimeTableBench/results/`.
+OrdoTable (`OrdoTable.md`) のデータ構造の候補を同じ条件で実装・計測し、採用する構造を決める.
+コードと再現手順は、コミット `16a2957` の `bench/OrdoTableBench/` (`git show 16a2957:bench/OrdoTableBench/README.md`). 生の結果 (全指標) は同コミットの `bench/OrdoTableBench/results/`.
 実装後の、他の DB との比較は `bench/OrdoMemory.Benchmark/`.
 
 ## 条件
@@ -141,7 +141,7 @@ Mono でも順位は同じ (Mono の SortedSet は削除+挿入で最大 200ms �
 
 現行案 (A) と設計案の初版 (C) は、どちらの場合も採用しない.
 
-**決定: PK による範囲検索は不要 (All は必要だが順序は問わない) のため、D を採用する.** 設計は `RuntimeTable.md`.
+**決定: PK による範囲検索は不要 (All は必要だが順序は問わない) のため、D を採用する.** 設計は `OrdoTable.md`.
 
 ### 二次索引
 

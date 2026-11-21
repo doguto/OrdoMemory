@@ -9,9 +9,9 @@ namespace OrdoMemory.Generator
 {
     // Unity が対応する Microsoft.CodeAnalysis 3.8 で動かすため、IIncrementalGenerator ではなく ISourceGenerator を使う.
     [Generator]
-    public sealed class RuntimeTableGenerator : ISourceGenerator
+    public sealed class OrdoTableGenerator : ISourceGenerator
     {
-        const string TableAttributeName = "OrdoMemory.RuntimeTableAttribute";
+        const string TableAttributeName = "OrdoMemory.OrdoTableAttribute";
         const string KeyAttributeName = "OrdoMemory.SecondaryKeyAttribute";
 
         public void Initialize(GeneratorInitializationContext context)
@@ -40,7 +40,7 @@ namespace OrdoMemory.Generator
                 var model = TableModel.Create(type, attr, keyAttr, context);
                 if (model == null) continue;
 
-                var hint = type.ToDisplayString().Replace('.', '_') + ".RuntimeTable.g.cs";
+                var hint = type.ToDisplayString().Replace('.', '_') + ".OrdoTable.g.cs";
                 context.AddSource(hint, SourceText.From(TableEmitter.Emit(model), Encoding.UTF8));
             }
         }
