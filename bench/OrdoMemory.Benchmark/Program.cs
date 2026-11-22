@@ -5,7 +5,7 @@ using BenchmarkDotNet.Running;
 
 namespace OrdoMemory.Benchmark
 {
-    static class Program
+    internal static class Program
     {
         static int Main(string[] args)
         {
@@ -18,10 +18,10 @@ namespace OrdoMemory.Benchmark
             }
 
             var config = DefaultConfig.Instance
-                .AddDiagnoser(MemoryDiagnoser.Default)
-                .AddColumn(StatisticColumn.P95)
-                .HideColumns(Column.Error, Column.StdDev, Column.RatioSD)
-                .WithOptions(ConfigOptions.DisableLogFile);
+                                      .AddDiagnoser(MemoryDiagnoser.Default)
+                                      .AddColumn(StatisticColumn.P95)
+                                      .HideColumns(Column.Error, Column.StdDev, Column.RatioSD)
+                                      .WithOptions(ConfigOptions.DisableLogFile);
 
             BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args, config);
             return 0;

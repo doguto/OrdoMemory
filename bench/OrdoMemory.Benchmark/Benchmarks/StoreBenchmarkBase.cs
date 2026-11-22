@@ -56,7 +56,11 @@ namespace OrdoMemory.Benchmark.Benchmarks
         {
             var rng = new Rng(seed);
             var result = new int[StreamLength];
-            for (var i = 0; i < result.Length; i++) result[i] = rng.Next(exclusiveMax);
+            for (var i = 0; i < result.Length; i++)
+            {
+                result[i] = rng.Next(exclusiveMax);
+            }
+
             return result;
         }
 
@@ -72,7 +76,7 @@ namespace OrdoMemory.Benchmark.Benchmarks
         {
             store.Remove(keys[index]);
             var row = rows[index];
-            row.Value = value;
+            row.value = value;
             rows[index] = row;
             keys[index] = store.Insert(row);
         }

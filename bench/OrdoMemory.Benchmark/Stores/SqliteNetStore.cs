@@ -61,18 +61,30 @@ namespace OrdoMemory.Benchmark.Stores
             return item.Id;
         }
 
-        public bool TryFind(long key, out ItemData row) => ToData(connection.Find<SnItem>((int)key), out row);
+        public bool TryFind(long key, out ItemData row)
+        {
+            return ToData(connection.Find<SnItem>((int)key), out row);
+        }
 
-        public bool TryFindByCode(int code, out ItemData row) =>
-            ToData(connection.FindWithQuery<SnItem>("SELECT * FROM item WHERE Code = ?", code), out row);
+        public bool TryFindByCode(int code, out ItemData row)
+        {
+            return ToData(connection.FindWithQuery<SnItem>("SELECT * FROM item WHERE Code = ?", code), out row);
+        }
 
-        public bool TryFindByName(string name, out ItemData row) =>
-            ToData(connection.FindWithQuery<SnItem>("SELECT * FROM item WHERE Name = ?", name), out row);
+        public bool TryFindByName(string name, out ItemData row)
+        {
+            return ToData(connection.FindWithQuery<SnItem>("SELECT * FROM item WHERE Name = ?", name), out row);
+        }
 
-        public long SumByCategory(int category) => Sum(connection.Query<SnItem>("SELECT * FROM item WHERE Category = ?", category));
+        public long SumByCategory(int category)
+        {
+            return Sum(connection.Query<SnItem>("SELECT * FROM item WHERE Category = ?", category));
+        }
 
-        public long SumRangeByCode(int min, int max) =>
-            Sum(connection.Query<SnItem>("SELECT * FROM item WHERE Code BETWEEN ? AND ?", min, max));
+        public long SumRangeByCode(int min, int max)
+        {
+            return Sum(connection.Query<SnItem>("SELECT * FROM item WHERE Code BETWEEN ? AND ?", min, max));
+        }
 
         public long SumAll()
         {
@@ -81,19 +93,29 @@ namespace OrdoMemory.Benchmark.Stores
             return sum;
         }
 
-        public bool UpdateValue(long key, int value) =>
-            connection.Execute("UPDATE item SET Value = ? WHERE Id = ?", value, (int)key) == 1;
+        public bool UpdateValue(long key, int value)
+        {
+            return connection.Execute("UPDATE item SET Value = ? WHERE Id = ?", value, (int)key) == 1;
+        }
 
-        public bool UpdateCategory(long key, int category) =>
-            connection.Execute("UPDATE item SET Category = ? WHERE Id = ?", category, (int)key) == 1;
+        public bool UpdateCategory(long key, int category)
+        {
+            return connection.Execute("UPDATE item SET Category = ? WHERE Id = ?", category, (int)key) == 1;
+        }
 
-        public bool Remove(long key) => connection.Delete<SnItem>((int)key) == 1;
+        public bool Remove(long key)
+        {
+            return connection.Delete<SnItem>((int)key) == 1;
+        }
 
         public void UpdateValues(long[] keys, int[] values)
         {
             connection.RunInTransaction(() =>
             {
-                for (var i = 0; i < keys.Length; i++) UpdateValue(keys[i], values[i]);
+                for (var i = 0; i < keys.Length; i++)
+                {
+                    UpdateValue(keys[i], values[i]);
+                }
             });
         }
 
@@ -110,15 +132,18 @@ namespace OrdoMemory.Benchmark.Stores
             return sum;
         }
 
-        static SnItem ToItem(int id, in ItemData row) => new SnItem
+        static SnItem ToItem(int id, in ItemData row)
         {
-            Id = id,
-            Code = row.Code,
-            Category = row.Category,
-            Value = row.Value,
-            Name = row.Name,
-            Description = row.Description,
-        };
+            return new SnItem
+            {
+                Id = id,
+                Code = row.code,
+                Category = row.category,
+                Value = row.value,
+                Name = row.name,
+                Description = row.description
+            };
+        }
 
         static bool ToData(SnItem item, out ItemData row)
         {
@@ -130,11 +155,11 @@ namespace OrdoMemory.Benchmark.Stores
 
             row = new ItemData
             {
-                Code = item.Code,
-                Category = item.Category,
-                Value = item.Value,
-                Name = item.Name,
-                Description = item.Description,
+                code = item.Code,
+                category = item.Category,
+                value = item.Value,
+                name = item.Name,
+                description = item.Description
             };
             return true;
         }

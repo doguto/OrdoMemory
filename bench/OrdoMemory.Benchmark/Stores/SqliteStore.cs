@@ -26,7 +26,7 @@ namespace OrdoMemory.Benchmark.Stores
             connection = new SqliteConnection(new SqliteConnectionStringBuilder
             {
                 DataSource = path ?? ":memory:",
-                Pooling = false,
+                Pooling = false
             }.ToString());
             connection.Open();
 
@@ -64,7 +64,11 @@ namespace OrdoMemory.Benchmark.Stores
         {
             using var tx = connection.BeginTransaction();
             insert.Transaction = tx;
-            for (var i = 0; i < rows.Length; i++) keys[i] = Insert(rows[i]);
+            for (var i = 0; i < rows.Length; i++)
+            {
+                keys[i] = Insert(rows[i]);
+            }
+
             tx.Commit();
             insert.Transaction = null;
         }
@@ -74,20 +78,29 @@ namespace OrdoMemory.Benchmark.Stores
             var id = nextId++;
             var p = insert.Parameters;
             p[0].Value = id;
-            p[1].Value = row.Code;
-            p[2].Value = row.Category;
-            p[3].Value = row.Value;
-            p[4].Value = row.Name;
-            p[5].Value = row.Description;
+            p[1].Value = row.code;
+            p[2].Value = row.category;
+            p[3].Value = row.value;
+            p[4].Value = row.name;
+            p[5].Value = row.description;
             insert.ExecuteNonQuery();
             return id;
         }
 
-        public bool TryFind(long key, out ItemData row) => QuerySingle(find, key, out row);
+        public bool TryFind(long key, out ItemData row)
+        {
+            return QuerySingle(find, key, out row);
+        }
 
-        public bool TryFindByCode(int code, out ItemData row) => QuerySingle(findByCode, code, out row);
+        public bool TryFindByCode(int code, out ItemData row)
+        {
+            return QuerySingle(findByCode, code, out row);
+        }
 
-        public bool TryFindByName(string name, out ItemData row) => QuerySingle(findByName, name, out row);
+        public bool TryFindByName(string name, out ItemData row)
+        {
+            return QuerySingle(findByName, name, out row);
+        }
 
         public long SumByCategory(int category)
         {
@@ -102,11 +115,20 @@ namespace OrdoMemory.Benchmark.Stores
             return SumRows(sumRangeByCode);
         }
 
-        public long SumAll() => SumRows(sumAll);
+        public long SumAll()
+        {
+            return SumRows(sumAll);
+        }
 
-        public bool UpdateValue(long key, int value) => ExecuteKeyed(updateValue, key, value);
+        public bool UpdateValue(long key, int value)
+        {
+            return ExecuteKeyed(updateValue, key, value);
+        }
 
-        public bool UpdateCategory(long key, int category) => ExecuteKeyed(updateCategory, key, category);
+        public bool UpdateCategory(long key, int category)
+        {
+            return ExecuteKeyed(updateCategory, key, category);
+        }
 
         public bool Remove(long key)
         {
@@ -118,7 +140,11 @@ namespace OrdoMemory.Benchmark.Stores
         {
             using var tx = connection.BeginTransaction();
             updateValue.Transaction = tx;
-            for (var i = 0; i < keys.Length; i++) ExecuteKeyed(updateValue, keys[i], values[i]);
+            for (var i = 0; i < keys.Length; i++)
+            {
+                ExecuteKeyed(updateValue, keys[i], values[i]);
+            }
+
             tx.Commit();
             updateValue.Transaction = null;
         }
@@ -147,18 +173,21 @@ namespace OrdoMemory.Benchmark.Stores
         {
             long sum = 0;
             using var reader = command.ExecuteReader();
-            while (reader.Read()) sum += ReadRow(reader).Value;
+            while (reader.Read()) sum += ReadRow(reader).value;
             return sum;
         }
 
-        static ItemData ReadRow(SqliteDataReader reader) => new ItemData
+        static ItemData ReadRow(SqliteDataReader reader)
         {
-            Code = reader.GetInt32(0),
-            Category = reader.GetInt32(1),
-            Value = reader.GetInt32(2),
-            Name = reader.GetString(3),
-            Description = reader.GetString(4),
-        };
+            return new ItemData
+            {
+                code = reader.GetInt32(0),
+                category = reader.GetInt32(1),
+                value = reader.GetInt32(2),
+                name = reader.GetString(3),
+                description = reader.GetString(4)
+            };
+        }
 
         static bool ExecuteKeyed(SqliteCommand command, long key, int value)
         {

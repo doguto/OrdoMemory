@@ -22,21 +22,30 @@ namespace OrdoMemory.Benchmark.Benchmarks
         public void Overwrite()
         {
             var start = NextBlock();
-            for (var i = 0; i < Ops; i++) store.UpdateValue(keys[uniform[start + i]], valueRng.Next(1_000_000));
+            for (var i = 0; i < Ops; i++)
+            {
+                store.UpdateValue(keys[uniform[start + i]], valueRng.Next(1_000_000));
+            }
         }
 
         [Benchmark(OperationsPerInvoke = Ops, Description = "Update secondary key")]
         public void UpdateKey()
         {
             var start = NextBlock();
-            for (var i = 0; i < Ops; i++) store.UpdateCategory(keys[uniform[start + i]], categoryStream[start + i]);
+            for (var i = 0; i < Ops; i++)
+            {
+                store.UpdateCategory(keys[uniform[start + i]], categoryStream[start + i]);
+            }
         }
 
         [Benchmark(OperationsPerInvoke = Ops, Description = "Remove + Insert (churn)")]
         public void RemoveInsert()
         {
             var start = NextBlock();
-            for (var i = 0; i < Ops; i++) Replace(uniform[start + i], valueRng.Next(1_000_000));
+            for (var i = 0; i < Ops; i++)
+            {
+                Replace(uniform[start + i], valueRng.Next(1_000_000));
+            }
         }
     }
 
@@ -52,7 +61,11 @@ namespace OrdoMemory.Benchmark.Benchmarks
         {
             var rng = new Rng(Seed + 21);
             permutation = new int[N];
-            for (var i = 0; i < N; i++) permutation[i] = i;
+            for (var i = 0; i < N; i++)
+            {
+                permutation[i] = i;
+            }
+
             for (var i = N - 1; i > 0; i--)
             {
                 var j = rng.Next(i + 1);

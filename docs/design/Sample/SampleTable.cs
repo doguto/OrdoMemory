@@ -15,8 +15,8 @@ namespace OrdoMemory.Sample
 
         struct Slot
         {
-            public int Dense;
-            public uint Generation;
+            public int dense;
+            public uint generation;
         }
 
         SampleRow[] dense;
@@ -91,10 +91,10 @@ namespace OrdoMemory.Sample
         public ref readonly SampleRow FindRef(uint primaryKey, out bool found)
         {
             found = TryGetDense(primaryKey, out var index);
-            return ref found ? ref dense[index] : ref NotFound;
+            return ref found ? ref dense[index] : ref notFound;
         }
 
-        static readonly SampleRow NotFound = default;
+        static readonly SampleRow notFound = default;
 
         public bool Update(uint primaryKey, Optional<string> name = default, Optional<string> description = default)
         {
@@ -123,7 +123,7 @@ namespace OrdoMemory.Sample
             {
                 dense[index] = dense[last];
                 denseToSlot[index] = denseToSlot[last];
-                slots[denseToSlot[index]].Dense = index;
+                slots[denseToSlot[index]].dense = index;
             }
 
             dense[last] = default;
@@ -131,15 +131,15 @@ namespace OrdoMemory.Sample
 
             var slot = (int)(primaryKey & SlotMask);
             ref var s = ref slots[slot];
-            if (s.Generation < MaxGen)
+            if (s.generation < MaxGen)
             {
-                s.Generation++;
-                s.Dense = freeHead;
+                s.generation++;
+                s.dense = freeHead;
                 freeHead = slot;
             }
             else
             {
-                s.Generation = 0;
+                s.generation = 0;
                 retired++;
             }
 
@@ -253,7 +253,7 @@ namespace OrdoMemory.Sample
             public bool MoveNext()
             {
                 if (!primaryKeys.MoveNext()) return false;
-                index = table.slots[(int)(primaryKeys.Current & SlotMask)].Dense;
+                index = table.slots[(int)(primaryKeys.Current & SlotMask)].dense;
                 return true;
             }
         }
@@ -276,40 +276,40 @@ namespace OrdoMemory.Sample
             if (freeHead >= 0)
             {
                 slot = freeHead;
-                freeHead = slots[slot].Dense;
+                freeHead = slots[slot].dense;
             }
             else
             {
                 slot = slotCount++;
-                slots[slot].Generation = 1;
+                slots[slot].generation = 1;
             }
 
             dense[count] = row;
             denseToSlot[count] = slot;
-            slots[slot].Dense = count;
+            slots[slot].dense = count;
             count++;
             version++;
-            return MakePrimaryKey(slots[slot].Generation, slot);
+            return MakePrimaryKey(slots[slot].generation, slot);
         }
 
         bool TryGetDense(uint primaryKey, out int index)
         {
             var generation = primaryKey >> SlotBits;
             var slot = primaryKey & SlotMask;
-            if (generation == 0 || slot >= (uint)slotCount || slots[slot].Generation != generation)
+            if (generation == 0 || slot >= (uint)slotCount || slots[slot].generation != generation)
             {
                 index = -1;
                 return false;
             }
 
-            index = slots[slot].Dense;
+            index = slots[slot].dense;
             return true;
         }
 
         uint PrimaryKeyOf(int index)
         {
             var slot = denseToSlot[index];
-            return MakePrimaryKey(slots[slot].Generation, slot);
+            return MakePrimaryKey(slots[slot].generation, slot);
         }
 
         static uint MakePrimaryKey(uint generation, int slot)

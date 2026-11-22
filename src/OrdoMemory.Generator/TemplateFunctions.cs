@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace OrdoMemory.Generator
 {
-    static class TemplateFunctions
+    internal static class TemplateFunctions
     {
         public static string Render(Template template)
         {

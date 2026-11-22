@@ -14,10 +14,16 @@ namespace OrdoMemory
         public int Bits => 32;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ulong ToUInt64(uint primaryKey) => primaryKey;
+        public ulong ToUInt64(uint primaryKey)
+        {
+            return primaryKey;
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public uint FromUInt64(ulong value) => (uint)value;
+        public uint FromUInt64(ulong value)
+        {
+            return (uint)value;
+        }
     }
 
     public readonly struct UInt64PrimaryKey : IPrimaryKeyTraits<ulong>
@@ -25,10 +31,16 @@ namespace OrdoMemory
         public int Bits => 64;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ulong ToUInt64(ulong primaryKey) => primaryKey;
+        public ulong ToUInt64(ulong primaryKey)
+        {
+            return primaryKey;
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ulong FromUInt64(ulong value) => value;
+        public ulong FromUInt64(ulong value)
+        {
+            return value;
+        }
     }
 
     public interface IPrimaryKeyEnumerator<TPrimaryKey> where TPrimaryKey : unmanaged

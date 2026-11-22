@@ -4,26 +4,33 @@ namespace OrdoMemory.Benchmark
 {
     public struct ItemData
     {
-        public int Code;
-        public int Category;
-        public int Value;
-        public string Name;
-        public string Description;
+        public int code;
+        public int category;
+        public int value;
+        public string name;
+        public string description;
     }
 
     public static class Dataset
     {
         public const int RowsPerCategory = 64;
 
-        static readonly string[] Descriptions = CreateDescriptions();
+        static readonly string[] descriptions = CreateDescriptions();
 
-        public static int CategoryCount(int n) => Math.Max(1, n / RowsPerCategory);
+        public static int CategoryCount(int n)
+        {
+            return Math.Max(1, n / RowsPerCategory);
+        }
 
         public static ItemData[] Create(int n, ulong seed)
         {
             var rng = new Rng(seed);
             var codes = new int[n];
-            for (var i = 0; i < n; i++) codes[i] = i;
+            for (var i = 0; i < n; i++)
+            {
+                codes[i] = i;
+            }
+
             for (var i = n - 1; i > 0; i--)
             {
                 var j = rng.Next(i + 1);
@@ -36,23 +43,30 @@ namespace OrdoMemory.Benchmark
             {
                 rows[i] = new ItemData
                 {
-                    Code = codes[i],
-                    Category = rng.Next(categories),
-                    Value = rng.Next(1_000_000),
-                    Name = NameOf(codes[i]),
-                    Description = Descriptions[rng.Next(Descriptions.Length)],
+                    code = codes[i],
+                    category = rng.Next(categories),
+                    value = rng.Next(1_000_000),
+                    name = NameOf(codes[i]),
+                    description = descriptions[rng.Next(descriptions.Length)]
                 };
             }
 
             return rows;
         }
 
-        public static string NameOf(int code) => "item_" + code.ToString("D8");
+        public static string NameOf(int code)
+        {
+            return "item_" + code.ToString("D8");
+        }
 
         static string[] CreateDescriptions()
         {
             var result = new string[16];
-            for (var i = 0; i < result.Length; i++) result[i] = "description of item kind " + i;
+            for (var i = 0; i < result.Length; i++)
+            {
+                result[i] = "description of item kind " + i;
+            }
+
             return result;
         }
     }
@@ -74,9 +88,15 @@ namespace OrdoMemory.Benchmark
             return s;
         }
 
-        public int Next(int exclusiveMax) => (int)(NextUInt64() % (ulong)exclusiveMax);
+        public int Next(int exclusiveMax)
+        {
+            return (int)(NextUInt64() % (ulong)exclusiveMax);
+        }
 
-        public double NextDouble() => (NextUInt64() >> 11) * (1.0 / (1UL << 53));
+        public double NextDouble()
+        {
+            return (NextUInt64() >> 11) * (1.0 / (1UL << 53));
+        }
     }
 
     public sealed class Zipfian
@@ -96,7 +116,11 @@ namespace OrdoMemory.Benchmark
             this.scramble = scramble;
             rng = new Rng(seed);
 
-            for (var i = 1; i <= n; i++) zetan += 1.0 / Math.Pow(i, Theta);
+            for (var i = 1; i <= n; i++)
+            {
+                zetan += 1.0 / Math.Pow(i, Theta);
+            }
+
             var zeta2 = 1.0 + 1.0 / Math.Pow(2, Theta);
             alpha = 1.0 / (1.0 - Theta);
             eta = (1.0 - Math.Pow(2.0 / n, 1.0 - Theta)) / (1.0 - zeta2 / zetan);
@@ -107,9 +131,19 @@ namespace OrdoMemory.Benchmark
             var u = rng.NextDouble();
             var uz = u * zetan;
             long rank;
-            if (uz < 1.0) rank = 0;
-            else if (uz < 1.0 + Math.Pow(0.5, Theta)) rank = 1;
-            else rank = (long)(n * Math.Pow(eta * u - eta + 1.0, alpha));
+            if (uz < 1.0)
+            {
+                rank = 0;
+            }
+            else if (uz < 1.0 + Math.Pow(0.5, Theta))
+            {
+                rank = 1;
+            }
+            else
+            {
+                rank = (long)(n * Math.Pow(eta * u - eta + 1.0, alpha));
+            }
+
             if (rank >= n) rank = n - 1;
 
             return scramble ? (int)(Fnv64((ulong)rank) % (ulong)n) : (int)rank;

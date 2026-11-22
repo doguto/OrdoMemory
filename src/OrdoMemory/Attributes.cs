@@ -5,13 +5,13 @@ namespace OrdoMemory
     public enum PrimaryKeyKind
     {
         UInt32,
-        UInt64,
+        UInt64
     }
 
     public enum IndexKind
     {
         Ordered,
-        Hash,
+        Hash
     }
 
     [AttributeUsage(AttributeTargets.Struct, Inherited = false)]

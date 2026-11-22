@@ -10,7 +10,7 @@ namespace OrdoMemory.Tests
         sealed class Model<TKey>
         {
             readonly IComparer<TKey> comparer;
-            public readonly List<(TKey Key, ulong PrimaryKey)> Entries = new List<(TKey, ulong)>();
+            public readonly List<(TKey Key, ulong PrimaryKey)> Entries = new();
 
             public Model(IComparer<TKey> comparer)
             {
@@ -51,7 +51,7 @@ namespace OrdoMemory.Tests
             where TPT : struct, IPrimaryKeyTraits<TPrimaryKey>
         {
             var rnd = new Random(seed);
-            var index = new OrderedIndex<TKey, TKT, TPrimaryKey, TPT>(unique, nodeSize: 4);
+            var index = new OrderedIndex<TKey, TKT, TPrimaryKey, TPT>(unique, 4);
             var model = new Model<TKey>(comparer);
             ulong nextPrimaryKey = 1;
             var traits = default(TPT);
@@ -86,11 +86,14 @@ namespace OrdoMemory.Tests
                     }
 
                     var conflict = unique && (keys.Distinct(new EqComparer<TKey>(comparer)).Count() != k
-                        || keys.Any(key => model.Entries.Any(e => comparer.Compare(e.Key, key) == 0)));
+                                              || keys.Any(key => model.Entries.Any(e => comparer.Compare(e.Key, key) == 0)));
                     Assert.Equal(!conflict, index.AddRange(keys, primaryKeys));
                     if (!conflict)
                     {
-                        for (var i = 0; i < k; i++) model.Add(keys[i], traits.ToUInt64(primaryKeys[i]));
+                        for (var i = 0; i < k; i++)
+                        {
+                            model.Add(keys[i], traits.ToUInt64(primaryKeys[i]));
+                        }
                     }
                 }
                 else if (step % 50 == 0)
@@ -121,49 +124,86 @@ namespace OrdoMemory.Tests
         sealed class EqComparer<T> : IEqualityComparer<T>
         {
             readonly IComparer<T> comparer;
-            public EqComparer(IComparer<T> comparer) => this.comparer = comparer;
-            public bool Equals(T x, T y) => comparer.Compare(x, y) == 0;
-            public int GetHashCode(T obj) => 0;
+
+            public EqComparer(IComparer<T> comparer)
+            {
+                this.comparer = comparer;
+            }
+
+            public bool Equals(T x, T y)
+            {
+                return comparer.Compare(x, y) == 0;
+            }
+
+            public int GetHashCode(T obj)
+            {
+                return 0;
+            }
         }
 
         static string RandomString(Random rnd)
         {
             var len = rnd.Next(0, 7);
             var chars = new char[len];
-            for (var i = 0; i < len; i++) chars[i] = (char)('a' + rnd.Next(3));
+            for (var i = 0; i < len; i++)
+            {
+                chars[i] = (char)('a' + rnd.Next(3));
+            }
+
             return rnd.Next(30) == 0 ? null : new string(chars);
         }
 
         [Theory]
         [InlineData(1)]
         [InlineData(2)]
-        public void IntPacked(int seed) => RunRandom<int, Int32Key, uint, UInt32PrimaryKey>(false, r => r.Next(-50, 50), Comparer<int>.Default, seed);
+        public void IntPacked(int seed)
+        {
+            RunRandom<int, Int32Key, uint, UInt32PrimaryKey>(false, r => r.Next(-50, 50), Comparer<int>.Default, seed);
+        }
 
         [Theory]
         [InlineData(3)]
         [InlineData(4)]
-        public void IntUnique(int seed) => RunRandom<int, Int32Key, uint, UInt32PrimaryKey>(true, r => r.Next(-300, 300), Comparer<int>.Default, seed);
+        public void IntUnique(int seed)
+        {
+            RunRandom<int, Int32Key, uint, UInt32PrimaryKey>(true, r => r.Next(-300, 300), Comparer<int>.Default, seed);
+        }
 
         [Theory]
         [InlineData(5)]
-        public void IntWithUInt64Pk(int seed) => RunRandom<int, Int32Key, ulong, UInt64PrimaryKey>(false, r => r.Next(-50, 50), Comparer<int>.Default, seed);
+        public void IntWithUInt64Pk(int seed)
+        {
+            RunRandom<int, Int32Key, ulong, UInt64PrimaryKey>(false, r => r.Next(-50, 50), Comparer<int>.Default, seed);
+        }
 
         [Theory]
         [InlineData(6)]
-        public void LongNonUnique(int seed) => RunRandom<long, Int64Key, uint, UInt32PrimaryKey>(false, r => r.Next(-50, 50) * (long)uint.MaxValue, Comparer<long>.Default, seed);
+        public void LongNonUnique(int seed)
+        {
+            RunRandom<long, Int64Key, uint, UInt32PrimaryKey>(false, r => r.Next(-50, 50) * (long)uint.MaxValue, Comparer<long>.Default, seed);
+        }
 
         [Theory]
         [InlineData(7)]
         [InlineData(8)]
-        public void StringNonUnique(int seed) => RunRandom<string, StringKey, uint, UInt32PrimaryKey>(false, RandomString, StringComparer.Ordinal, seed);
+        public void StringNonUnique(int seed)
+        {
+            RunRandom<string, StringKey, uint, UInt32PrimaryKey>(false, RandomString, StringComparer.Ordinal, seed);
+        }
 
         [Theory]
         [InlineData(9)]
-        public void StringUnique(int seed) => RunRandom<string, StringKey, uint, UInt32PrimaryKey>(true, RandomString, StringComparer.Ordinal, seed);
+        public void StringUnique(int seed)
+        {
+            RunRandom<string, StringKey, uint, UInt32PrimaryKey>(true, RandomString, StringComparer.Ordinal, seed);
+        }
 
         [Theory]
         [InlineData(10)]
-        public void DoubleNonUnique(int seed) => RunRandom<double, DoubleKey, uint, UInt32PrimaryKey>(false, r => KeyConvert.Double(Math.Round(r.NextDouble() * 20 - 10, 1)), Comparer<double>.Default, seed);
+        public void DoubleNonUnique(int seed)
+        {
+            RunRandom<double, DoubleKey, uint, UInt32PrimaryKey>(false, r => KeyConvert.Double(Math.Round(r.NextDouble() * 20 - 10, 1)), Comparer<double>.Default, seed);
+        }
 
         [Fact]
         public void DoubleNormalizationOrder()

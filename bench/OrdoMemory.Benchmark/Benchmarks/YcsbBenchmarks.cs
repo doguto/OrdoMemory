@@ -10,7 +10,7 @@ namespace OrdoMemory.Benchmark.Benchmarks
         B,
         D,
         E,
-        F,
+        F
     }
 
     public class YcsbBenchmarks : StoreBenchmarkBase
@@ -23,7 +23,7 @@ namespace OrdoMemory.Benchmark.Benchmarks
             Update,
             Insert,
             Scan,
-            ReadModifyWrite,
+            ReadModifyWrite
         }
 
         Op[] ops;
@@ -41,7 +41,7 @@ namespace OrdoMemory.Benchmark.Benchmarks
         {
             var rng = new Rng(Seed + 31);
             var scrambled = new Zipfian(N, Seed + 32);
-            var latest = new Zipfian(N, Seed + 33, scramble: false);
+            var latest = new Zipfian(N, Seed + 33, false);
             valueRng = new Rng(Seed + 34);
 
             ops = new Op[StreamLength];
@@ -90,7 +90,7 @@ namespace OrdoMemory.Benchmark.Benchmarks
                 {
                     case Op.Read:
                         store.TryFind(keys[ReadIndex(args[i])], out var row);
-                        sum += row.Value;
+                        sum += row.value;
                         break;
                     case Op.Update:
                         store.UpdateValue(keys[args[i]], valueRng.Next(1_000_000));
@@ -105,7 +105,7 @@ namespace OrdoMemory.Benchmark.Benchmarks
                     case Op.ReadModifyWrite:
                         var key = keys[args[i]];
                         store.TryFind(key, out var current);
-                        store.UpdateValue(key, current.Value + 1);
+                        store.UpdateValue(key, current.value + 1);
                         break;
                 }
             }

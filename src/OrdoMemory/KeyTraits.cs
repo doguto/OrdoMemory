@@ -21,9 +21,15 @@ namespace OrdoMemory
         public bool NeedsFullComparison => false;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ulong Normalize(int key) => (uint)(key ^ int.MinValue);
+        public ulong Normalize(int key)
+        {
+            return (uint)(key ^ int.MinValue);
+        }
 
-        public int CompareFull(int a, int b) => a.CompareTo(b);
+        public int CompareFull(int a, int b)
+        {
+            return a.CompareTo(b);
+        }
     }
 
     public readonly struct Int64Key : IOrderedKeyTraits<long>
@@ -32,9 +38,15 @@ namespace OrdoMemory
         public bool NeedsFullComparison => false;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ulong Normalize(long key) => (ulong)(key ^ long.MinValue);
+        public ulong Normalize(long key)
+        {
+            return (ulong)(key ^ long.MinValue);
+        }
 
-        public int CompareFull(long a, long b) => a.CompareTo(b);
+        public int CompareFull(long a, long b)
+        {
+            return a.CompareTo(b);
+        }
     }
 
     public readonly struct UInt64Key : IOrderedKeyTraits<ulong>
@@ -43,9 +55,15 @@ namespace OrdoMemory
         public bool NeedsFullComparison => false;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ulong Normalize(ulong key) => key;
+        public ulong Normalize(ulong key)
+        {
+            return key;
+        }
 
-        public int CompareFull(ulong a, ulong b) => a.CompareTo(b);
+        public int CompareFull(ulong a, ulong b)
+        {
+            return a.CompareTo(b);
+        }
     }
 
     public readonly struct DoubleKey : IOrderedKeyTraits<double>
@@ -62,7 +80,10 @@ namespace OrdoMemory
             return (bits & SignBit) != 0 ? ~bits : bits | SignBit;
         }
 
-        public int CompareFull(double a, double b) => a.CompareTo(b);
+        public int CompareFull(double a, double b)
+        {
+            return a.CompareTo(b);
+        }
     }
 
     public readonly struct StringKey : IOrderedKeyTraits<string>
@@ -76,12 +97,19 @@ namespace OrdoMemory
             if (key == null) return 0;
             ulong v = 0;
             var n = key.Length < 4 ? key.Length : 4;
-            for (var i = 0; i < n; i++) v |= (ulong)key[i] << (48 - 16 * i);
+            for (var i = 0; i < n; i++)
+            {
+                v |= (ulong)key[i] << (48 - 16 * i);
+            }
+
             return v;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public int CompareFull(string a, string b) => string.CompareOrdinal(a, b);
+        public int CompareFull(string a, string b)
+        {
+            return string.CompareOrdinal(a, b);
+        }
     }
 
     public static class KeyConvert
@@ -100,9 +128,12 @@ namespace OrdoMemory
             ? (IEqualityComparer<TKey>)(object)StringComparer.Ordinal
             : EqualityComparer<TKey>.Default;
 
-        static readonly bool CanBeNull = default(TKey) == null;
+        static readonly bool canBeNull = default(TKey) == null;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool IsNull(TKey key) => CanBeNull && key == null;
+        public static bool IsNull(TKey key)
+        {
+            return canBeNull && key == null;
+        }
     }
 }

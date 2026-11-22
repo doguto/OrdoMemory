@@ -43,12 +43,15 @@ namespace OrdoMemory.Benchmark
         SqliteNet,
         SqliteNetInMemory,
         LiteDb,
-        LiteDbInMemory,
+        LiteDbInMemory
     }
 
     public static class StoreFactory
     {
-        public static bool SupportsPointWrites(Target target) => target != Target.MasterMemory;
+        public static bool SupportsPointWrites(Target target)
+        {
+            return target != Target.MasterMemory;
+        }
 
         public static IStore Create(Target target)
         {
@@ -103,6 +106,9 @@ namespace OrdoMemory.Benchmark
             return value.Split(',').Select(s => (Target)Enum.Parse(typeof(Target), s.Trim(), true));
         }
 
-        public static IEnumerable<Target> WritableTargets() => Targets().Where(StoreFactory.SupportsPointWrites);
+        public static IEnumerable<Target> WritableTargets()
+        {
+            return Targets().Where(StoreFactory.SupportsPointWrites);
+        }
     }
 }

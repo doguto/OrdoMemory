@@ -54,7 +54,10 @@ namespace OrdoMemory.Tests
         {
             var table = new ItemTable();
             var primaryKeys = new uint[5];
-            for (var i = 0; i < 5; i++) table.TryInsert(NewItem(i), out primaryKeys[i]);
+            for (var i = 0; i < 5; i++)
+            {
+                table.TryInsert(NewItem(i), out primaryKeys[i]);
+            }
 
             table.Remove(primaryKeys[1]);
             for (var i = 0; i < 5; i++)
@@ -92,12 +95,12 @@ namespace OrdoMemory.Tests
             Assert.False(table.TryInsert(NewItem(2, tag: "x"), out _));
             Assert.True(table.TryInsert(NewItem(2, tag: "y"), out var b));
 
-            Assert.False(table.Update(b, code: 1));
+            Assert.False(table.Update(b, 1));
             Assert.True(table.TryFind(b, out var row));
             Assert.Equal(2, row.Code);
             Assert.True(table.TryFindByCode(2, out _));
 
-            Assert.True(table.Update(b, code: 3, tag: "z"));
+            Assert.True(table.Update(b, 3, tag: "z"));
             Assert.False(table.TryFindByCode(2, out _));
             Assert.True(table.TryFindByCode(3, out row));
             Assert.Equal("z", row.Tag);
@@ -138,7 +141,10 @@ namespace OrdoMemory.Tests
         {
             var table = new ItemTable();
             var names = new[] { "bob", "alice", "bob", "carol", "alice", "bobby", "", null };
-            for (var i = 0; i < names.Length; i++) table.TryInsert(NewItem(i, names[i], (Kind)(i % 3), score: i - 3.5), out _);
+            for (var i = 0; i < names.Length; i++)
+            {
+                table.TryInsert(NewItem(i, names[i], (Kind)(i % 3), score: i - 3.5), out _);
+            }
 
             var bobs = new List<int>();
             foreach (ref readonly var r in table.FindAllByName("bob")) bobs.Add(r.Code);
@@ -173,7 +179,10 @@ namespace OrdoMemory.Tests
         {
             var table = new ItemTable();
             var primaryKeys = new uint[3];
-            for (var i = 0; i < 3; i++) table.TryInsert(NewItem(i), out primaryKeys[i]);
+            for (var i = 0; i < 3; i++)
+            {
+                table.TryInsert(NewItem(i), out primaryKeys[i]);
+            }
 
             Assert.Throws<InvalidOperationException>(() =>
             {
@@ -182,7 +191,7 @@ namespace OrdoMemory.Tests
 
             Assert.Throws<InvalidOperationException>(() =>
             {
-                foreach (ref readonly var r in table.FindRangeByCode(0, 1000)) table.Update(primaryKeys[0], code: r.Code + 1000);
+                foreach (ref readonly var r in table.FindRangeByCode(0, 1000)) table.Update(primaryKeys[0], r.Code + 1000);
             });
         }
 
@@ -190,7 +199,7 @@ namespace OrdoMemory.Tests
         public void BulkInsertSmallAndLarge()
         {
             var table = new ItemTable();
-            var rows = Enumerable.Range(0, 1000).Select(i => NewItem(i * 2, "n" + (i % 17), (Kind)(i % 3), score: i)).ToArray();
+            var rows = Enumerable.Range(0, 1000).Select(i => NewItem(i * 2, "n" + i % 17, (Kind)(i % 3), score: i)).ToArray();
             var primaryKeys = new uint[rows.Length];
             Assert.True(table.TryBulkInsert(rows, primaryKeys));
             Assert.Equal(1000, table.Count);
@@ -215,7 +224,10 @@ namespace OrdoMemory.Tests
         public void BulkInsertRollsBackOnDuplicate()
         {
             var table = new ItemTable();
-            for (var i = 0; i < 100; i++) table.TryInsert(NewItem(i), out _);
+            for (var i = 0; i < 100; i++)
+            {
+                table.TryInsert(NewItem(i), out _);
+            }
 
             var conflict = new[] { NewItem(1000), NewItem(5, tag: "fresh") };
             Assert.False(table.TryBulkInsert(conflict, new uint[2]));
@@ -250,7 +262,11 @@ namespace OrdoMemory.Tests
         public void SlotExhaustion()
         {
             var table = new TinyRowTable();
-            for (var i = 0; i < 4; i++) Assert.True(table.TryInsert(new TinyRow(i), out _));
+            for (var i = 0; i < 4; i++)
+            {
+                Assert.True(table.TryInsert(new TinyRow(i), out _));
+            }
+
             Assert.False(table.TryInsert(new TinyRow(9), out _));
             Assert.False(table.TryBulkInsert(new[] { new TinyRow(10) }, new uint[1]));
             Assert.Equal(4, table.Count);
@@ -260,13 +276,16 @@ namespace OrdoMemory.Tests
         public void UInt64PrimaryKey()
         {
             var table = new BigTable();
-            Assert.True(table.TryInsert(new BigRow(5, 1), out ulong a));
+            Assert.True(table.TryInsert(new BigRow(5, 1), out var a));
             Assert.True(table.TryInsert(new BigRow(5, 2), out var b));
             Assert.True(table.TryInsert(new BigRow(long.MinValue, 3), out _));
             Assert.Equal(1UL << 32, a & ~0xFFFFFFFFUL);
 
             var primaryKeys = new List<ulong>();
-            foreach (ref readonly var _ in table.FindAllByValue(5)) { }
+            foreach (ref readonly var _ in table.FindAllByValue(5))
+            {
+            }
+
             var e = table.FindAllByValue(5).GetEnumerator();
             while (e.MoveNext()) primaryKeys.Add(e.CurrentPrimaryKey);
             Assert.Equal(new[] { a, b }.OrderBy(x => x), primaryKeys);
@@ -281,12 +300,22 @@ namespace OrdoMemory.Tests
         {
             var table = new ItemTable(100);
             var primaryKeys = new uint[50];
-            for (var i = 0; i < 50; i++) table.TryInsert(NewItem(i, "n" + (i % 5)), out primaryKeys[i]);
-            for (var i = 0; i < 50; i += 2) table.Remove(primaryKeys[i]);
+            for (var i = 0; i < 50; i++)
+            {
+                table.TryInsert(NewItem(i, "n" + i % 5), out primaryKeys[i]);
+            }
+
+            for (var i = 0; i < 50; i += 2)
+            {
+                table.Remove(primaryKeys[i]);
+            }
 
             table.TrimExcess();
             Assert.Equal(25, table.Capacity);
-            for (var i = 1; i < 50; i += 2) Assert.True(table.TryFindByCode(i, out _));
+            for (var i = 1; i < 50; i += 2)
+            {
+                Assert.True(table.TryFindByCode(i, out _));
+            }
 
             var n = 0;
             foreach (ref readonly var _ in table.FindAllByName("n1")) n++;
@@ -298,9 +327,13 @@ namespace OrdoMemory.Tests
         public void QueriesDoNotAllocate()
         {
             var table = new ItemTable();
-            for (var i = 0; i < 1000; i++) table.TryInsert(NewItem(i, "n" + (i % 10), (Kind)(i % 3), score: i), out _);
+            for (var i = 0; i < 1000; i++)
+            {
+                table.TryInsert(NewItem(i, "n" + i % 10, (Kind)(i % 3), score: i), out _);
+            }
 
             long sum = 0;
+
             void Run()
             {
                 foreach (ref readonly var r in table.All()) sum += r.Code;

@@ -58,11 +58,20 @@ namespace OrdoMemory.Benchmark.Stores
             return item.Id;
         }
 
-        public bool TryFind(long key, out ItemData row) => ToData(items.FindById((int)key), out row);
+        public bool TryFind(long key, out ItemData row)
+        {
+            return ToData(items.FindById((int)key), out row);
+        }
 
-        public bool TryFindByCode(int code, out ItemData row) => ToData(items.FindOne(Query.EQ(nameof(LdItem.Code), code)), out row);
+        public bool TryFindByCode(int code, out ItemData row)
+        {
+            return ToData(items.FindOne(Query.EQ(nameof(LdItem.Code), code)), out row);
+        }
 
-        public bool TryFindByName(string name, out ItemData row) => ToData(items.FindOne(Query.EQ(nameof(LdItem.Name), name)), out row);
+        public bool TryFindByName(string name, out ItemData row)
+        {
+            return ToData(items.FindOne(Query.EQ(nameof(LdItem.Name), name)), out row);
+        }
 
         public long SumByCategory(int category)
         {
@@ -101,12 +110,19 @@ namespace OrdoMemory.Benchmark.Stores
             return items.Update(item);
         }
 
-        public bool Remove(long key) => items.Delete((int)key);
+        public bool Remove(long key)
+        {
+            return items.Delete((int)key);
+        }
 
         public void UpdateValues(long[] keys, int[] values)
         {
             db.BeginTrans();
-            for (var i = 0; i < keys.Length; i++) UpdateValue(keys[i], values[i]);
+            for (var i = 0; i < keys.Length; i++)
+            {
+                UpdateValue(keys[i], values[i]);
+            }
+
             db.Commit();
         }
 
@@ -116,15 +132,18 @@ namespace OrdoMemory.Benchmark.Stores
             if (path != null) StoreFactory.DeleteFiles(path);
         }
 
-        static LdItem ToItem(int id, in ItemData row) => new LdItem
+        static LdItem ToItem(int id, in ItemData row)
         {
-            Id = id,
-            Code = row.Code,
-            Category = row.Category,
-            Value = row.Value,
-            Name = row.Name,
-            Description = row.Description,
-        };
+            return new LdItem
+            {
+                Id = id,
+                Code = row.code,
+                Category = row.category,
+                Value = row.value,
+                Name = row.name,
+                Description = row.description
+            };
+        }
 
         static bool ToData(LdItem item, out ItemData row)
         {
@@ -136,11 +155,11 @@ namespace OrdoMemory.Benchmark.Stores
 
             row = new ItemData
             {
-                Code = item.Code,
-                Category = item.Category,
-                Value = item.Value,
-                Name = item.Name,
-                Description = item.Description,
+                code = item.Code,
+                category = item.Category,
+                value = item.Value,
+                name = item.Name,
+                description = item.Description
             };
             return true;
         }

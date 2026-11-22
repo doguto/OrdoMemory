@@ -8,14 +8,11 @@ namespace OrdoMemory.Benchmark
     [OrdoTable]
     public readonly partial struct OrdoItem
     {
-        [SecondaryKey]
-        public readonly int Code;
+        [SecondaryKey] public readonly int Code;
 
-        [SecondaryKey(Unique = false)]
-        public readonly int Category;
+        [SecondaryKey(Unique = false)] public readonly int Category;
 
-        [SecondaryKey(IndexKind.Hash)]
-        public readonly string Name;
+        [SecondaryKey(IndexKind.Hash)] public readonly string Name;
 
         public readonly int Value;
 

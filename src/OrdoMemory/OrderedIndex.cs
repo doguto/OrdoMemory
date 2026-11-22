@@ -71,7 +71,10 @@ namespace OrdoMemory
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        static ulong ToU(TPrimaryKey primaryKey) => default(TPrimaryKeyTraits).ToUInt64(primaryKey);
+        static ulong ToU(TPrimaryKey primaryKey)
+        {
+            return default(TPrimaryKeyTraits).ToUInt64(primaryKey);
+        }
 
         readonly struct Probe
         {
@@ -106,7 +109,7 @@ namespace OrdoMemory
             }
 
             if (!comparesPk) return 0;
-            return primaryKey == probe.Pk ? 0 : (primaryKey < probe.Pk ? -1 : 1);
+            return primaryKey == probe.Pk ? 0 : primaryKey < probe.Pk ? -1 : 1;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -143,8 +146,14 @@ namespace OrdoMemory
             while (lo < hi)
             {
                 var mid = (lo + hi) >> 1;
-                if (CompareLeaf(baseSlot + mid, probe) < 0) lo = mid + 1;
-                else hi = mid;
+                if (CompareLeaf(baseSlot + mid, probe) < 0)
+                {
+                    lo = mid + 1;
+                }
+                else
+                {
+                    hi = mid;
+                }
             }
 
             return lo;
@@ -158,8 +167,14 @@ namespace OrdoMemory
             while (lo < hi)
             {
                 var mid = (lo + hi) >> 1;
-                if (CompareInner(baseSlot + mid, probe) <= 0) lo = mid + 1;
-                else hi = mid;
+                if (CompareInner(baseSlot + mid, probe) <= 0)
+                {
+                    lo = mid + 1;
+                }
+                else
+                {
+                    hi = mid;
+                }
             }
 
             return lo == 0 ? 0 : lo - 1;
@@ -296,8 +311,14 @@ namespace OrdoMemory
             if (next >= 0) lPrev[next] = right;
             lNext[leaf] = right;
 
-            if (pos < split) LeafInsertAt(leaf, pos, probe.Norm, key, primaryKey);
-            else LeafInsertAt(right, pos - split, probe.Norm, key, primaryKey);
+            if (pos < split)
+            {
+                LeafInsertAt(leaf, pos, probe.Norm, key, primaryKey);
+            }
+            else
+            {
+                LeafInsertAt(right, pos - split, probe.Norm, key, primaryKey);
+            }
 
             var rs = right * b;
             PromoteSplit(1, lNorm[rs], NeedsFullComparison ? lFull[rs] : default, comparesPk ? ToU(lPk[rs]) : 0, right, leaf);
@@ -382,8 +403,14 @@ namespace OrdoMemory
 
                 iCount[node] = split;
                 iCount[right] = n;
-                if (pos <= split && split != b) InnerInsertAt(node, pos, sepNorm, sepFull, sepPk, child);
-                else InnerInsertAt(right, pos - split, sepNorm, sepFull, sepPk, child);
+                if (pos <= split && split != b)
+                {
+                    InnerInsertAt(node, pos, sepNorm, sepFull, sepPk, child);
+                }
+                else
+                {
+                    InnerInsertAt(right, pos - split, sepNorm, sepFull, sepPk, child);
+                }
 
                 var rs = right * b;
                 sepNorm = iNorm[rs];
@@ -508,7 +535,11 @@ namespace OrdoMemory
                 for (var i = 0; i < k; i++)
                 {
                     if (Insert(keys[i], primaryKeys[i])) continue;
-                    for (var j = 0; j < i; j++) Remove(keys[j], primaryKeys[j]);
+                    for (var j = 0; j < i; j++)
+                    {
+                        Remove(keys[j], primaryKeys[j]);
+                    }
+
                     return false;
                 }
 
@@ -527,7 +558,10 @@ namespace OrdoMemory
                 for (var leaf = LeftmostLeaf(); leaf >= 0; leaf = lNext[leaf])
                 {
                     var baseSlot = leaf * b;
-                    for (var i = 0; i < lCount[leaf]; i++) buf.Set(w++, lNorm[baseSlot + i], NeedsFullComparison ? lFull[baseSlot + i] : default, PkAtSlot(baseSlot + i));
+                    for (var i = 0; i < lCount[leaf]; i++)
+                    {
+                        buf.Set(w++, lNorm[baseSlot + i], NeedsFullComparison ? lFull[baseSlot + i] : default, PkAtSlot(baseSlot + i));
+                    }
                 }
 
                 Build(buf, w);
@@ -554,9 +588,9 @@ namespace OrdoMemory
                 }
 
                 sortComparer ??= new EntryComparer(this);
-                sortComparer.Target = incoming;
+                sortComparer.target = incoming;
                 Array.Sort(order, 0, k, sortComparer);
-                sortComparer.Target = default;
+                sortComparer.target = default;
 
                 var w = 0;
                 var leaf = LeftmostLeaf();
@@ -617,7 +651,11 @@ namespace OrdoMemory
         {
             var leaves = Math.Max(1, (n + b - 1) / b);
             var inners = 0;
-            for (var width = leaves; width > 1; width = (width + b - 1) / b) inners += (width + b - 1) / b;
+            for (var width = leaves; width > 1; width = (width + b - 1) / b)
+            {
+                inners += (width + b - 1) / b;
+            }
+
             Reset(leaves, Math.Max(1, inners));
             count = n;
             if (n == 0) return;
@@ -659,8 +697,14 @@ namespace OrdoMemory
                         {
                             var child = level[start + i];
                             var cs = child * b;
-                            if (isLeafLevel) SetInner(node * b + i, lNorm[cs], NeedsFullComparison ? lFull[cs] : default, comparesPk ? ToU(lPk[cs]) : 0, child);
-                            else SetInner(node * b + i, iNorm[cs], NeedsFullComparison ? iFull[cs] : default, comparesPk ? iPk[cs] : 0, child);
+                            if (isLeafLevel)
+                            {
+                                SetInner(node * b + i, lNorm[cs], NeedsFullComparison ? lFull[cs] : default, comparesPk ? ToU(lPk[cs]) : 0, child);
+                            }
+                            else
+                            {
+                                SetInner(node * b + i, iNorm[cs], NeedsFullComparison ? iFull[cs] : default, comparesPk ? iPk[cs] : 0, child);
+                            }
                         }
 
                         iCount[node] = cnt;
@@ -688,7 +732,11 @@ namespace OrdoMemory
         int LeftmostLeaf()
         {
             var node = root;
-            for (var level = height; level > 0; level--) node = iChild[node * b];
+            for (var level = height; level > 0; level--)
+            {
+                node = iChild[node * b];
+            }
+
             return node;
         }
 
@@ -724,7 +772,7 @@ namespace OrdoMemory
         sealed class EntryComparer : IComparer<int>
         {
             readonly OrderedIndex<TKey, TKeyTraits, TPrimaryKey, TPrimaryKeyTraits> index;
-            public EntryBuffer Target;
+            public EntryBuffer target;
 
             public EntryComparer(OrderedIndex<TKey, TKeyTraits, TPrimaryKey, TPrimaryKeyTraits> index)
             {
@@ -733,7 +781,7 @@ namespace OrdoMemory
 
             public int Compare(int x, int y)
             {
-                var t = Target;
+                var t = target;
                 var probe = new Probe(t.Norm[y], NeedsFullComparison ? t.Full[y] : default, ToU(t.Pk[y]));
                 return index.Compare(t.Norm[x], NeedsFullComparison ? t.Full[x] : default, ToU(t.Pk[x]), probe);
             }

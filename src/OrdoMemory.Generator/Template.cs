@@ -6,10 +6,10 @@ namespace OrdoMemory.Generator
 {
     // 複数行の埋め込みを穴の位置のインデントに揃え、空の埋め込みだけの行は出力しない
     [InterpolatedStringHandler]
-    sealed class Template
+    internal sealed class Template
     {
-        readonly List<string> lines = new List<string>();
-        readonly StringBuilder currentLine = new StringBuilder();
+        readonly List<string> lines = new();
+        readonly StringBuilder currentLine = new();
         bool dropCurrentLineIfBlank;
 
         public Template(int literalLength, int formattedCount)

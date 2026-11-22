@@ -46,7 +46,7 @@ namespace OrdoMemory.Generator
 
         sealed class Receiver : ISyntaxReceiver
         {
-            public readonly List<StructDeclarationSyntax> Candidates = new List<StructDeclarationSyntax>();
+            public readonly List<StructDeclarationSyntax> Candidates = new();
 
             public void OnVisitSyntaxNode(SyntaxNode node)
             {

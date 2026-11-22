@@ -13,8 +13,8 @@ namespace OrdoMemory
 
         struct Slot
         {
-            public int Dense;
-            public uint Generation;
+            public int dense;
+            public uint generation;
         }
 
         readonly int slotBits;
@@ -68,13 +68,13 @@ namespace OrdoMemory
             }
 
             ref var s = ref slots[(int)slot];
-            if (s.Generation != generation)
+            if (s.generation != generation)
             {
                 index = -1;
                 return false;
             }
 
-            index = s.Dense;
+            index = s.dense;
             return true;
         }
 
@@ -87,13 +87,13 @@ namespace OrdoMemory
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int IndexOf(TPrimaryKey primaryKey)
         {
-            return slots[(int)(default(TPrimaryKeyTraits).ToUInt64(primaryKey) & slotMask)].Dense;
+            return slots[(int)(default(TPrimaryKeyTraits).ToUInt64(primaryKey) & slotMask)].dense;
         }
 
         public TPrimaryKey PrimaryKeyAt(int index)
         {
             var slot = denseToSlot[index];
-            return MakePrimaryKey(slots[slot].Generation, slot);
+            return MakePrimaryKey(slots[slot].generation, slot);
         }
 
         public bool TryReserve(int required)
@@ -116,20 +116,20 @@ namespace OrdoMemory
             if (freeHead >= 0)
             {
                 slot = freeHead;
-                freeHead = slots[slot].Dense;
+                freeHead = slots[slot].dense;
             }
             else
             {
                 slot = slotCount++;
-                slots[slot].Generation = 1;
+                slots[slot].generation = 1;
             }
 
             dense[count] = row;
             denseToSlot[count] = slot;
-            slots[slot].Dense = count;
+            slots[slot].dense = count;
             count++;
             version++;
-            return MakePrimaryKey(slots[slot].Generation, slot);
+            return MakePrimaryKey(slots[slot].generation, slot);
         }
 
         public void RemoveAt(int index)
@@ -140,22 +140,22 @@ namespace OrdoMemory
             {
                 dense[index] = dense[last];
                 denseToSlot[index] = denseToSlot[last];
-                slots[denseToSlot[index]].Dense = index;
+                slots[denseToSlot[index]].dense = index;
             }
 
             dense[last] = default;
             count = last;
 
             ref var s = ref slots[slot];
-            if (s.Generation < maxGeneration)
+            if (s.generation < maxGeneration)
             {
-                s.Generation++;
-                s.Dense = freeHead;
+                s.generation++;
+                s.dense = freeHead;
                 freeHead = slot;
             }
             else
             {
-                s.Generation = 0;
+                s.generation = 0;
                 retired++;
             }
 

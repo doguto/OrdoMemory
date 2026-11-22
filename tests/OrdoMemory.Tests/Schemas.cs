@@ -4,26 +4,22 @@ namespace OrdoMemory.Tests
     {
         A,
         B,
-        C,
+        C
     }
 
     [OrdoTable]
     public readonly partial struct Item
     {
-        [SecondaryKey]
-        public readonly int Code;
+        [SecondaryKey] public readonly int Code;
 
-        [SecondaryKey(Unique = false)]
-        public readonly string Name;
+        [SecondaryKey(Unique = false)] public readonly string Name;
 
         [SecondaryKey(IndexKind.Hash, Unique = false)]
         public readonly Kind Kind;
 
-        [SecondaryKey(IndexKind.Hash)]
-        public readonly string Tag;
+        [SecondaryKey(IndexKind.Hash)] public readonly string Tag;
 
-        [SecondaryKey(Unique = false)]
-        public readonly double Score;
+        [SecondaryKey(Unique = false)] public readonly double Score;
 
         public readonly string Description;
     }
@@ -31,8 +27,7 @@ namespace OrdoMemory.Tests
     [OrdoTable(PrimaryKey = PrimaryKeyKind.UInt64, TableName = "BigTable")]
     public readonly partial struct BigRow
     {
-        [SecondaryKey(Unique = false)]
-        public readonly long Value;
+        [SecondaryKey(Unique = false)] public readonly long Value;
 
         public readonly int PrimaryKey;
     }
@@ -46,7 +41,6 @@ namespace OrdoMemory.Tests
     [OrdoTable(SlotBits = 2)]
     public readonly partial struct TinyRow
     {
-        [SecondaryKey]
-        public readonly int Value;
+        [SecondaryKey] public readonly int Value;
     }
 }

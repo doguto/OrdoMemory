@@ -14,16 +14,17 @@ namespace OrdoMemory.Benchmark
             sb.AppendLine("|---|---:|---:|---:|---:|");
 
             foreach (var n in BenchEnv.Sizes())
+            foreach (var target in BenchEnv.Targets())
             {
-                foreach (var target in BenchEnv.Targets())
+                using (var warm = StoreFactory.Create(target))
                 {
-                    using (var warm = StoreFactory.Create(target)) warm.Insert(Dataset.Create(1, 1)[0]);
-
-                    var (managed, native) = Measure(target, n);
-                    var line = $"| {target} | {n:N0} | {managed / (double)n:F1} | {native / (double)n:F1} | {(managed + native) / (double)n:F1} |";
-                    Console.WriteLine(line);
-                    sb.AppendLine(line);
+                    warm.Insert(Dataset.Create(1, 1)[0]);
                 }
+
+                var (managed, native) = Measure(target, n);
+                var line = $"| {target} | {n:N0} | {managed / (double)n:F1} | {native / (double)n:F1} | {(managed + native) / (double)n:F1} |";
+                Console.WriteLine(line);
+                sb.AppendLine(line);
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath)));

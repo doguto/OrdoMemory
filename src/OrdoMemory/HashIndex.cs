@@ -5,7 +5,7 @@ namespace OrdoMemory
 {
     public sealed class HashUniqueIndex<TKey, TPrimaryKey> where TPrimaryKey : unmanaged
     {
-        readonly Dictionary<TKey, TPrimaryKey> map = new Dictionary<TKey, TPrimaryKey>(KeyComparer<TKey>.Default);
+        readonly Dictionary<TKey, TPrimaryKey> map = new(KeyComparer<TKey>.Default);
         bool hasNull;
         TPrimaryKey nullPrimaryKey;
 
@@ -42,8 +42,15 @@ namespace OrdoMemory
         {
             if (!TryGetFirst(key, out var current) || !EqualityComparer<TPrimaryKey>.Default.Equals(current, primaryKey)) return false;
 
-            if (!KeyComparer<TKey>.IsNull(key)) map.Remove(key);
-            else hasNull = false;
+            if (!KeyComparer<TKey>.IsNull(key))
+            {
+                map.Remove(key);
+            }
+            else
+            {
+                hasNull = false;
+            }
+
             return true;
         }
 
@@ -55,7 +62,11 @@ namespace OrdoMemory
             for (var i = 0; i < keys.Length; i++)
             {
                 if (Insert(keys[i], primaryKeys[i])) continue;
-                for (var j = 0; j < i; j++) Remove(keys[j], primaryKeys[j]);
+                for (var j = 0; j < i; j++)
+                {
+                    Remove(keys[j], primaryKeys[j]);
+                }
+
                 return false;
             }
 
@@ -93,7 +104,7 @@ namespace OrdoMemory
     {
         const int InitialPostingLength = 2;
 
-        readonly Dictionary<TKey, int> map = new Dictionary<TKey, int>(KeyComparer<TKey>.Default);
+        readonly Dictionary<TKey, int> map = new(KeyComparer<TKey>.Default);
         int nullPosting = -1;
 
         TPrimaryKey[][] postings = new TPrimaryKey[4][];
@@ -134,8 +145,14 @@ namespace OrdoMemory
             if (id < 0)
             {
                 id = AllocatePosting();
-                if (KeyComparer<TKey>.IsNull(key)) nullPosting = id;
-                else map.Add(key, id);
+                if (KeyComparer<TKey>.IsNull(key))
+                {
+                    nullPosting = id;
+                }
+                else
+                {
+                    map.Add(key, id);
+                }
             }
 
             var list = postings[id];
@@ -169,8 +186,15 @@ namespace OrdoMemory
                 count--;
                 if (last == 0)
                 {
-                    if (KeyComparer<TKey>.IsNull(key)) nullPosting = -1;
-                    else map.Remove(key);
+                    if (KeyComparer<TKey>.IsNull(key))
+                    {
+                        nullPosting = -1;
+                    }
+                    else
+                    {
+                        map.Remove(key);
+                    }
+
                     FreePosting(id);
                 }
 
@@ -183,7 +207,11 @@ namespace OrdoMemory
         public bool AddRange(ReadOnlySpan<TKey> keys, ReadOnlySpan<TPrimaryKey> primaryKeys)
         {
             if (primaryKeys.Length < keys.Length) throw new ArgumentException("primaryKeys is shorter than keys.", nameof(primaryKeys));
-            for (var i = 0; i < keys.Length; i++) Insert(keys[i], primaryKeys[i]);
+            for (var i = 0; i < keys.Length; i++)
+            {
+                Insert(keys[i], primaryKeys[i]);
+            }
+
             return true;
         }
 

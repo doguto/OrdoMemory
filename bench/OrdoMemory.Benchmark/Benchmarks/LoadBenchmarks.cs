@@ -59,7 +59,10 @@ namespace OrdoMemory.Benchmark.Benchmarks
         [Benchmark(Description = "Insert N rows one by one")]
         public void InsertOneByOne()
         {
-            for (var i = 0; i < rows.Length; i++) keys[i] = store.Insert(rows[i]);
+            for (var i = 0; i < rows.Length; i++)
+            {
+                keys[i] = store.Insert(rows[i]);
+            }
         }
     }
 }

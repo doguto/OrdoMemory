@@ -3,331 +3,333 @@ using static OrdoMemory.Generator.TemplateFunctions;
 
 namespace OrdoMemory.Generator
 {
-    static class TableEmitter
+    internal static class TableEmitter
     {
         public static string Emit(TableModel model)
         {
-            var rowType = model.RowFullName;
-            var primaryKeyType = model.PrimaryKeyType;
-            var storeType = $"global::OrdoMemory.RowStore<{rowType}, {primaryKeyType}, {model.PrimaryKeyTraits}>";
+            var rowType = model.rowFullName;
+            var primaryKeyType = model.primaryKeyType;
+            var storeType = $"global::OrdoMemory.RowStore<{rowType}, {primaryKeyType}, {model.primaryKeyTraits}>";
 
             var table = Render($$"""
-                {{If(model.GenerateConstructor, EmitConstructor(model))}}
+                                 {{If(model.generateConstructor, EmitConstructor(model))}}
 
-                {{model.Accessibility}} sealed partial class {{model.TableName}}
-                {
-                    public const {{primaryKeyType}} InvalidPrimaryKey = 0;
-                    public const int SlotBits = {{model.SlotBits}};
+                                 {{model.accessibility}} sealed partial class {{model.tableName}}
+                                 {
+                                     public const {{primaryKeyType}} InvalidPrimaryKey = 0;
+                                     public const int SlotBits = {{model.slotBits}};
+                                 
+                                     static readonly {{rowType}} __notFound = default;
+                                 
+                                     readonly {{storeType}} __store;
+                                     {{Each(model.keys, key => $"readonly {IndexType(model, key)} {key.IndexField};")}}
+                                 
+                                     public {{model.tableName}}(int capacity = 0)
+                                     {
+                                         __store = new {{storeType}}(capacity, SlotBits);
+                                         {{Each(model.keys, key => $"{key.IndexField} = new {IndexType(model, key)}({IndexConstructorArguments(key)});")}}
+                                     }
+                                 
+                                     public int Count => __store.Count;
+                                 
+                                     public int Capacity => __store.Capacity;
+                                 
+                                     {{EmitInsert(model)}}
+                                 
+                                     {{EmitBulkInsert(model)}}
+                                 
+                                     {{EmitFind(model)}}
+                                 
+                                     {{EmitUpdate(model)}}
+                                 
+                                     {{EmitRemove(model)}}
+                                 
+                                     public {{storeType}}.AllEnumerable All() => __store.All();
+                                 
+                                     {{Each(model.keys, key => EmitKeyQueries(model, key, storeType), "\n\n")}}
+                                 
+                                     public void TrimExcess()
+                                     {
+                                         __store.TrimExcess();
+                                         {{Each(model.keys, key => $"{key.IndexField}.TrimExcess();")}}
+                                     }
+                                 }
+                                 """);
 
-                    static readonly {{rowType}} __notFound = default;
-
-                    readonly {{storeType}} __store;
-                    {{Each(model.Keys, key => $"readonly {IndexType(model, key)} {key.IndexField};")}}
-
-                    public {{model.TableName}}(int capacity = 0)
-                    {
-                        __store = new {{storeType}}(capacity, SlotBits);
-                        {{Each(model.Keys, key => $"{key.IndexField} = new {IndexType(model, key)}({IndexConstructorArguments(key)});")}}
-                    }
-
-                    public int Count => __store.Count;
-
-                    public int Capacity => __store.Capacity;
-
-                    {{EmitInsert(model)}}
-
-                    {{EmitBulkInsert(model)}}
-
-                    {{EmitFind(model)}}
-
-                    {{EmitUpdate(model)}}
-
-                    {{EmitRemove(model)}}
-
-                    public {{storeType}}.AllEnumerable All() => __store.All();
-
-                    {{Each(model.Keys, key => EmitKeyQueries(model, key, storeType), "\n\n")}}
-
-                    public void TrimExcess()
-                    {
-                        __store.TrimExcess();
-                        {{Each(model.Keys, key => $"{key.IndexField}.TrimExcess();")}}
-                    }
-                }
-                """);
-
-            var body = model.Namespace == null ? table : Render($$"""
-                namespace {{model.Namespace}}
-                {
-                    {{table}}
-                }
-                """);
+            var body = model.namespaceName == null
+                ? table
+                : Render($$"""
+                           namespace {{model.namespaceName}}
+                           {
+                               {{table}}
+                           }
+                           """);
 
             return Render($$"""
-                // <auto-generated/>
-                #nullable disable
-                #pragma warning disable
+                            // <auto-generated/>
+                            #nullable disable
+                            #pragma warning disable
 
-                {{body}}
-                """) + "\n";
+                            {{body}}
+                            """) + "\n";
         }
 
         static string EmitConstructor(TableModel model)
         {
-            var parameters = string.Join(", ", model.Fields.Select(field => $"{field.Type} {field.ParameterName}"));
+            var parameters = string.Join(", ", model.fields.Select(field => $"{field.type} {field.parameterName}"));
             return Render($$"""
-                partial struct {{model.RowName}}
-                {
-                    public {{model.RowName}}({{parameters}})
-                    {
-                        {{Each(model.Fields, field => $"this.{field.Name} = {field.ParameterName};")}}
-                    }
-                }
-                """);
+                            partial struct {{model.rowName}}
+                            {
+                                public {{model.rowName}}({{parameters}})
+                                {
+                                    {{Each(model.fields, field => $"this.{field.name} = {field.parameterName};")}}
+                                }
+                            }
+                            """);
         }
 
         static string EmitInsert(TableModel model)
         {
-            var rejectConditions = model.Keys
-                .Where(key => key.Unique)
-                .Select(key => $"{key.IndexField}.ContainsKey({ConvertKey(key, "row." + key.Field.Name)})")
-                .Concat(new[] { "!__store.TryReserve(1)" });
+            var rejectConditions = model.keys
+                                        .Where(key => key.unique)
+                                        .Select(key => $"{key.IndexField}.ContainsKey({ConvertKey(key, "row." + key.field.name)})")
+                                        .Concat(new[] { "!__store.TryReserve(1)" });
 
             return Render($$"""
-                public bool TryInsert(in {{model.RowFullName}} row, out {{model.PrimaryKeyType}} primaryKey)
-                {
-                    if ({{string.Join(" || ", rejectConditions)}})
-                    {
-                        primaryKey = InvalidPrimaryKey;
-                        return false;
-                    }
-
-                    primaryKey = __store.Store(in row);
-                    {{Each(model.Keys, key => $"{key.IndexField}.Insert({ConvertKey(key, "row." + key.Field.Name)}, primaryKey);")}}
-                    return true;
-                }
-                """);
+                            public bool TryInsert(in {{model.rowFullName}} row, out {{model.primaryKeyType}} primaryKey)
+                            {
+                                if ({{string.Join(" || ", rejectConditions)}})
+                                {
+                                    primaryKey = InvalidPrimaryKey;
+                                    return false;
+                                }
+                            
+                                primaryKey = __store.Store(in row);
+                                {{Each(model.keys, key => $"{key.IndexField}.Insert({ConvertKey(key, "row." + key.field.name)}, primaryKey);")}}
+                                return true;
+                            }
+                            """);
         }
 
         static string EmitBulkInsert(TableModel model)
         {
-            var rowType = model.RowFullName;
-            var primaryKeyType = model.PrimaryKeyType;
-            var keyIndices = Enumerable.Range(0, model.Keys.Count).ToList();
+            var rowType = model.rowFullName;
+            var primaryKeyType = model.primaryKeyType;
+            var keyIndices = Enumerable.Range(0, model.keys.Count).ToList();
 
-            var removeFromIndexes = If(model.Keys.Count > 0, Render($$"""
-                for (var i = 0; i < rows.Length; i++)
-                {
-                    {{Each(keyIndices, keyIndex => EmitRollbackIndex(model, keyIndex))}}
-                }
-                """));
+            var removeFromIndexes = If(model.keys.Count > 0, Render($$"""
+                                                                      for (var i = 0; i < rows.Length; i++)
+                                                                      {
+                                                                          {{Each(keyIndices, keyIndex => EmitRollbackIndex(model, keyIndex))}}
+                                                                      }
+                                                                      """));
 
             return Render($$"""
-                public bool TryBulkInsert(global::System.ReadOnlySpan<{{rowType}}> rows, global::System.Span<{{primaryKeyType}}> primaryKeys)
-                {
-                    if (primaryKeys.Length < rows.Length) throw new global::System.ArgumentException("primaryKeys is shorter than rows.", nameof(primaryKeys));
-                    var rowCount = rows.Length;
-                    if (rowCount == 0) return true;
-                    if (!__store.TryReserve(rowCount)) return false;
+                            public bool TryBulkInsert(global::System.ReadOnlySpan<{{rowType}}> rows, global::System.Span<{{primaryKeyType}}> primaryKeys)
+                            {
+                                if (primaryKeys.Length < rows.Length) throw new global::System.ArgumentException("primaryKeys is shorter than rows.", nameof(primaryKeys));
+                                var rowCount = rows.Length;
+                                if (rowCount == 0) return true;
+                                if (!__store.TryReserve(rowCount)) return false;
+                            
+                                for (var i = 0; i < rowCount; i++) primaryKeys[i] = __store.Store(in rows[i]);
+                                global::System.ReadOnlySpan<{{primaryKeyType}}> stored = primaryKeys.Slice(0, rowCount);
+                            
+                                {{Each(keyIndices, keyIndex => EmitBulkInsertIndex(model, keyIndex), "\n\n")}}
+                            
+                                return true;
+                            }
 
-                    for (var i = 0; i < rowCount; i++) primaryKeys[i] = __store.Store(in rows[i]);
-                    global::System.ReadOnlySpan<{{primaryKeyType}}> stored = primaryKeys.Slice(0, rowCount);
-
-                    {{Each(keyIndices, keyIndex => EmitBulkInsertIndex(model, keyIndex), "\n\n")}}
-
-                    return true;
-                }
-
-                void __RollbackBulkInsert(global::System.ReadOnlySpan<{{rowType}}> rows, global::System.ReadOnlySpan<{{primaryKeyType}}> primaryKeys, int addedIndexes)
-                {
-                    {{removeFromIndexes}}
-
-                    for (var i = 0; i < rows.Length; i++) __store.RemoveAt(__store.Count - 1);
-                }
-                """);
+                            void __RollbackBulkInsert(global::System.ReadOnlySpan<{{rowType}}> rows, global::System.ReadOnlySpan<{{primaryKeyType}}> primaryKeys, int addedIndexes)
+                            {
+                                {{removeFromIndexes}}
+                            
+                                for (var i = 0; i < rows.Length; i++) __store.RemoveAt(__store.Count - 1);
+                            }
+                            """);
         }
 
         static string EmitBulkInsertIndex(TableModel model, int keyIndex)
         {
-            var key = model.Keys[keyIndex];
-            var pool = $"global::System.Buffers.ArrayPool<{key.KeyType}>.Shared";
+            var key = model.keys[keyIndex];
+            var pool = $"global::System.Buffers.ArrayPool<{key.keyType}>.Shared";
             return Render($$"""
-                var keys{{keyIndex}} = {{pool}}.Rent(rowCount);
-                bool added{{keyIndex}};
-                try
-                {
-                    for (var i = 0; i < rowCount; i++) keys{{keyIndex}}[i] = {{ConvertKey(key, "rows[i]." + key.Field.Name)}};
-                    added{{keyIndex}} = {{key.IndexField}}.AddRange(new global::System.ReadOnlySpan<{{key.KeyType}}>(keys{{keyIndex}}, 0, rowCount), stored);
-                }
-                finally
-                {
-                    {{pool}}.Return(keys{{keyIndex}}{{If(key.KeyIsReference, ", true")}});
-                }
+                            var keys{{keyIndex}} = {{pool}}.Rent(rowCount);
+                            bool added{{keyIndex}};
+                            try
+                            {
+                                for (var i = 0; i < rowCount; i++) keys{{keyIndex}}[i] = {{ConvertKey(key, "rows[i]." + key.field.name)}};
+                                added{{keyIndex}} = {{key.IndexField}}.AddRange(new global::System.ReadOnlySpan<{{key.keyType}}>(keys{{keyIndex}}, 0, rowCount), stored);
+                            }
+                            finally
+                            {
+                                {{pool}}.Return(keys{{keyIndex}}{{If(key.keyIsReference, ", true")}});
+                            }
 
-                if (!added{{keyIndex}})
-                {
-                    __RollbackBulkInsert(rows, stored, {{keyIndex}});
-                    return false;
-                }
-                """);
+                            if (!added{{keyIndex}})
+                            {
+                                __RollbackBulkInsert(rows, stored, {{keyIndex}});
+                                return false;
+                            }
+                            """);
         }
 
         static string EmitRollbackIndex(TableModel model, int keyIndex)
         {
-            var key = model.Keys[keyIndex];
-            return $"if (addedIndexes > {keyIndex}) {key.IndexField}.Remove({ConvertKey(key, "rows[i]." + key.Field.Name)}, primaryKeys[i]);";
+            var key = model.keys[keyIndex];
+            return $"if (addedIndexes > {keyIndex}) {key.IndexField}.Remove({ConvertKey(key, "rows[i]." + key.field.name)}, primaryKeys[i]);";
         }
 
         static string EmitFind(TableModel model)
         {
-            var rowType = model.RowFullName;
-            var primaryKeyType = model.PrimaryKeyType;
+            var rowType = model.rowFullName;
+            var primaryKeyType = model.primaryKeyType;
             return Render($$"""
-                public bool Contains({{primaryKeyType}} primaryKey) => __store.TryGetIndex(primaryKey, out _);
+                            public bool Contains({{primaryKeyType}} primaryKey) => __store.TryGetIndex(primaryKey, out _);
 
-                public bool TryFind({{primaryKeyType}} primaryKey, out {{rowType}} row)
-                {
-                    if (__store.TryGetIndex(primaryKey, out var index))
-                    {
-                        row = __store.RowAt(index);
-                        return true;
-                    }
+                            public bool TryFind({{primaryKeyType}} primaryKey, out {{rowType}} row)
+                            {
+                                if (__store.TryGetIndex(primaryKey, out var index))
+                                {
+                                    row = __store.RowAt(index);
+                                    return true;
+                                }
+                            
+                                row = default;
+                                return false;
+                            }
 
-                    row = default;
-                    return false;
-                }
-
-                public ref readonly {{rowType}} FindRef({{primaryKeyType}} primaryKey, out bool found)
-                {
-                    found = __store.TryGetIndex(primaryKey, out var index);
-                    if (found) return ref __store.RowAt(index);
-                    return ref __notFound;
-                }
-                """);
+                            public ref readonly {{rowType}} FindRef({{primaryKeyType}} primaryKey, out bool found)
+                            {
+                                found = __store.TryGetIndex(primaryKey, out var index);
+                                if (found) return ref __store.RowAt(index);
+                                return ref __notFound;
+                            }
+                            """);
         }
 
         static string EmitUpdate(TableModel model)
         {
-            var parameters = string.Join(", ", model.Fields.Select(field => $"global::OrdoMemory.Optional<{field.Type}> {field.ParameterName} = default"));
-            var arguments = string.Join(", ", model.Fields.Select(field => $"{field.ParameterName}.OrElse(__current.{field.Name})"));
-            var keyIndices = Enumerable.Range(0, model.Keys.Count).ToList();
-            var uniqueKeyIndices = keyIndices.Where(keyIndex => model.Keys[keyIndex].Unique).ToList();
-            var conflictCondition = string.Join(" || ", uniqueKeyIndices.Select(keyIndex => $"(__changed{keyIndex} && {model.Keys[keyIndex].IndexField}.ContainsKey(__newKey{keyIndex}))"));
+            var parameters = string.Join(", ", model.fields.Select(field => $"global::OrdoMemory.Optional<{field.type}> {field.parameterName} = default"));
+            var arguments = string.Join(", ", model.fields.Select(field => $"{field.parameterName}.OrElse(__current.{field.name})"));
+            var keyIndices = Enumerable.Range(0, model.keys.Count).ToList();
+            var uniqueKeyIndices = keyIndices.Where(keyIndex => model.keys[keyIndex].unique).ToList();
+            var conflictCondition = string.Join(" || ", uniqueKeyIndices.Select(keyIndex => $"(__changed{keyIndex} && {model.keys[keyIndex].IndexField}.ContainsKey(__newKey{keyIndex}))"));
             var anyChangedCondition = string.Join(" || ", keyIndices.Select(keyIndex => $"__changed{keyIndex}"));
 
             return Render($$"""
-                public bool Update({{model.PrimaryKeyType}} primaryKey, {{parameters}})
-                {
-                    if (!__store.TryGetIndex(primaryKey, out var __index)) return false;
-
-                    ref var __current = ref __store.RowAt(__index);
-                    var __next = new {{model.RowFullName}}({{arguments}});
-                    {{Each(keyIndices, keyIndex => EmitDetectKeyChange(model, keyIndex))}}
-                    {{If(uniqueKeyIndices.Count > 0, $"if ({conflictCondition}) return false;")}}
-                    {{Each(keyIndices, keyIndex => EmitApplyKeyChange(model, keyIndex))}}
-
-                    __current = __next;
-                    {{If(keyIndices.Count > 0, $"if ({anyChangedCondition}) __store.Touch();")}}
-                    return true;
-                }
-                """);
+                            public bool Update({{model.primaryKeyType}} primaryKey, {{parameters}})
+                            {
+                                if (!__store.TryGetIndex(primaryKey, out var __index)) return false;
+                            
+                                ref var __current = ref __store.RowAt(__index);
+                                var __next = new {{model.rowFullName}}({{arguments}});
+                                {{Each(keyIndices, keyIndex => EmitDetectKeyChange(model, keyIndex))}}
+                                {{If(uniqueKeyIndices.Count > 0, $"if ({conflictCondition}) return false;")}}
+                                {{Each(keyIndices, keyIndex => EmitApplyKeyChange(model, keyIndex))}}
+                            
+                                __current = __next;
+                                {{If(keyIndices.Count > 0, $"if ({anyChangedCondition}) __store.Touch();")}}
+                                return true;
+                            }
+                            """);
         }
 
         static string EmitDetectKeyChange(TableModel model, int keyIndex)
         {
-            var key = model.Keys[keyIndex];
+            var key = model.keys[keyIndex];
             return Render($$"""
-                var __oldKey{{keyIndex}} = {{ConvertKey(key, "__current." + key.Field.Name)}};
-                var __newKey{{keyIndex}} = {{ConvertKey(key, "__next." + key.Field.Name)}};
-                var __changed{{keyIndex}} = !global::System.Collections.Generic.EqualityComparer<{{key.KeyType}}>.Default.Equals(__oldKey{{keyIndex}}, __newKey{{keyIndex}});
-                """);
+                            var __oldKey{{keyIndex}} = {{ConvertKey(key, "__current." + key.field.name)}};
+                            var __newKey{{keyIndex}} = {{ConvertKey(key, "__next." + key.field.name)}};
+                            var __changed{{keyIndex}} = !global::System.Collections.Generic.EqualityComparer<{{key.keyType}}>.Default.Equals(__oldKey{{keyIndex}}, __newKey{{keyIndex}});
+                            """);
         }
 
         static string EmitApplyKeyChange(TableModel model, int keyIndex)
         {
-            var indexField = model.Keys[keyIndex].IndexField;
+            var indexField = model.keys[keyIndex].IndexField;
             return Render($$"""
-                if (__changed{{keyIndex}})
-                {
-                    {{indexField}}.Remove(__oldKey{{keyIndex}}, primaryKey);
-                    {{indexField}}.Insert(__newKey{{keyIndex}}, primaryKey);
-                }
-                """);
+                            if (__changed{{keyIndex}})
+                            {
+                                {{indexField}}.Remove(__oldKey{{keyIndex}}, primaryKey);
+                                {{indexField}}.Insert(__newKey{{keyIndex}}, primaryKey);
+                            }
+                            """);
         }
 
         static string EmitRemove(TableModel model)
         {
-            var removeFromIndexes = If(model.Keys.Count > 0, Render($$"""
-                ref readonly var row = ref __store.RowAt(index);
-                {{Each(model.Keys, key => $"{key.IndexField}.Remove({ConvertKey(key, "row." + key.Field.Name)}, primaryKey);")}}
-                """));
+            var removeFromIndexes = If(model.keys.Count > 0, Render($$"""
+                                                                      ref readonly var row = ref __store.RowAt(index);
+                                                                      {{Each(model.keys, key => $"{key.IndexField}.Remove({ConvertKey(key, "row." + key.field.name)}, primaryKey);")}}
+                                                                      """));
 
             return Render($$"""
-                public bool Remove({{model.PrimaryKeyType}} primaryKey)
-                {
-                    if (!__store.TryGetIndex(primaryKey, out var index)) return false;
-
-                    {{removeFromIndexes}}
-                    __store.RemoveAt(index);
-                    return true;
-                }
-                """);
+                            public bool Remove({{model.primaryKeyType}} primaryKey)
+                            {
+                                if (!__store.TryGetIndex(primaryKey, out var index)) return false;
+                            
+                                {{removeFromIndexes}}
+                                __store.RemoveAt(index);
+                                return true;
+                            }
+                            """);
         }
 
         static string EmitKeyQueries(TableModel model, KeyModel key, string storeType)
         {
-            var rowType = model.RowFullName;
-            var fieldName = key.Field.Name;
-            var fieldType = key.Field.Type;
+            var rowType = model.rowFullName;
+            var fieldName = key.field.name;
+            var fieldType = key.field.type;
             var indexField = key.IndexField;
             var enumerableType = $"{storeType}.IndexEnumerable<{InnerEnumeratorType(model, key)}>";
-            var findFirstMethod = key.Unique ? $"TryFindBy{fieldName}" : $"TryFindFirstBy{fieldName}";
-            var findFirstPrimaryKeyMethod = key.Unique ? $"TryFindPrimaryKeyBy{fieldName}" : $"TryFindFirstPrimaryKeyBy{fieldName}";
+            var findFirstMethod = key.unique ? $"TryFindBy{fieldName}" : $"TryFindFirstBy{fieldName}";
+            var findFirstPrimaryKeyMethod = key.unique ? $"TryFindPrimaryKeyBy{fieldName}" : $"TryFindFirstPrimaryKeyBy{fieldName}";
 
             return Render($$"""
-                public bool {{findFirstMethod}}({{fieldType}} key, out {{rowType}} row)
-                {
-                    if ({{indexField}}.TryGetFirst({{ConvertKey(key, "key")}}, out var primaryKey))
-                    {
-                        row = __store.RowAt(__store.IndexOf(primaryKey));
-                        return true;
-                    }
+                            public bool {{findFirstMethod}}({{fieldType}} key, out {{rowType}} row)
+                            {
+                                if ({{indexField}}.TryGetFirst({{ConvertKey(key, "key")}}, out var primaryKey))
+                                {
+                                    row = __store.RowAt(__store.IndexOf(primaryKey));
+                                    return true;
+                                }
+                            
+                                row = default;
+                                return false;
+                            }
 
-                    row = default;
-                    return false;
-                }
+                            public bool {{findFirstPrimaryKeyMethod}}({{fieldType}} key, out {{model.primaryKeyType}} primaryKey) => {{indexField}}.TryGetFirst({{ConvertKey(key, "key")}}, out primaryKey);
 
-                public bool {{findFirstPrimaryKeyMethod}}({{fieldType}} key, out {{model.PrimaryKeyType}} primaryKey) => {{indexField}}.TryGetFirst({{ConvertKey(key, "key")}}, out primaryKey);
+                            {{If(!key.unique, $"public {enumerableType} FindAllBy{fieldName}({fieldType} key) => __store.Enumerate({indexField}.Equal({ConvertKey(key, "key")}));")}}
 
-                {{If(!key.Unique, $"public {enumerableType} FindAllBy{fieldName}({fieldType} key) => __store.Enumerate({indexField}.Equal({ConvertKey(key, "key")}));")}}
-
-                {{If(!key.Hash, $"public {enumerableType} FindRangeBy{fieldName}({fieldType} min, {fieldType} max) => __store.Enumerate({indexField}.Range({ConvertKey(key, "min")}, {ConvertKey(key, "max")}));")}}
-                """);
+                            {{If(!key.hash, $"public {enumerableType} FindRangeBy{fieldName}({fieldType} min, {fieldType} max) => __store.Enumerate({indexField}.Range({ConvertKey(key, "min")}, {ConvertKey(key, "max")}));")}}
+                            """);
         }
 
         static string IndexType(TableModel model, KeyModel key)
         {
-            if (!key.Hash) return $"global::OrdoMemory.OrderedIndex<{key.KeyType}, {key.KeyTraits}, {model.PrimaryKeyType}, {model.PrimaryKeyTraits}>";
-            return key.Unique
-                ? $"global::OrdoMemory.HashUniqueIndex<{key.KeyType}, {model.PrimaryKeyType}>"
-                : $"global::OrdoMemory.HashMultiIndex<{key.KeyType}, {model.PrimaryKeyType}>";
+            if (!key.hash) return $"global::OrdoMemory.OrderedIndex<{key.keyType}, {key.keyTraits}, {model.primaryKeyType}, {model.primaryKeyTraits}>";
+            return key.unique
+                ? $"global::OrdoMemory.HashUniqueIndex<{key.keyType}, {model.primaryKeyType}>"
+                : $"global::OrdoMemory.HashMultiIndex<{key.keyType}, {model.primaryKeyType}>";
         }
 
         static string IndexConstructorArguments(KeyModel key)
         {
-            if (key.Hash) return "";
-            return key.Unique ? "true" : "false";
+            if (key.hash) return "";
+            return key.unique ? "true" : "false";
         }
 
         static string InnerEnumeratorType(TableModel model, KeyModel key)
         {
-            if (!key.Hash) return IndexType(model, key) + ".RangeEnumerator";
-            return IndexType(model, key) + (key.Unique ? ".SingleEnumerator" : ".Enumerator");
+            if (!key.hash) return IndexType(model, key) + ".RangeEnumerator";
+            return IndexType(model, key) + (key.unique ? ".SingleEnumerator" : ".Enumerator");
         }
 
         static string ConvertKey(KeyModel key, string expression)
         {
-            return string.Format(key.Convert, expression);
+            return string.Format(key.convert, expression);
         }
     }
 }

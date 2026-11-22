@@ -41,8 +41,8 @@ int count;
 // スロット番号 → dense の位置. ハンドルの下位ビットがスロット番号.
 struct Slot
 {
-    public int Dense;  // 使用中: dense の位置 / 空き: 次の空きスロット (空きリスト)
-    public uint Generation;   // 世代. 1 から始め、スロットを再利用するたびに進める. 0 は未使用 / 使用停止
+    public int dense;  // 使用中: dense の位置 / 空き: 次の空きスロット (空きリスト)
+    public uint generation;   // 世代. 1 から始め、スロットを再利用するたびに進める. 0 は未使用 / 使用停止
 }
 Slot[] slots;
 
@@ -91,11 +91,11 @@ PK は符号なし整数とする. 符号ビットも世代に使え、`>>` が�
 
 - 世代は 1 から始める. そのため PK = 0 は払い出されず、`default` の PK がそのまま無効値 (`InvalidPrimaryKey`) になる.
   - 代入し忘れた PK が、スロット 0 の Record を静かに指す事故を防ぐため.
-- スロットの `Generation = 0` は「未使用 / 使用停止」を表す. 世代 0 の PK は Find で弾くため、どの PK とも一致しない.
+- スロットの `generation = 0` は「未使用 / 使用停止」を表す. 世代 0 の PK は Find で弾くため、どの PK とも一致しない.
 
 ### 世代の一周
 
-- 世代が最大値に達したスロットは、`Generation = 0` にして空きリストに戻さず、使用を止める.
+- 世代が最大値に達したスロットは、`generation = 0` にして空きリストに戻さず、使用を止める.
   - 古いハンドルが、同じスロットを再利用した別の Record を指す事故 (ABA) を防ぐため.
   - 使用を止めたスロットは 1 つにつき 8B を消費し続ける.
 - スロットを使い切った場合、Insert を失敗させる.
@@ -111,18 +111,18 @@ var generation = primaryKey >> SlotBits;
 var slot = primaryKey & SlotMask;
 if (generation == 0 || slot >= (uint)slotCount) return miss;   // 無効値 / 使用停止との一致を弾く
 ref var s = ref slots[slot];
-if (s.Generation != generation) return miss;               // 削除済み / 再利用済み
-return ref dense[s.Dense];
+if (s.generation != generation) return miss;               // 削除済み / 再利用済み
+return ref dense[s.dense];
 ```
 
-- 空きスロットの `Generation` は Remove の時点で進めてあるため、削除済みの PK は世代の比較で弾かれる.
+- 空きスロットの `generation` は Remove の時点で進めてあるため、削除済みの PK は世代の比較で弾かれる.
 
 ### Insert
 
-1. 空きリストの先頭からスロットを取る. 無ければ `slotCount` 番目を新しく使い、`Generation = 1` とする.
+1. 空きリストの先頭からスロットを取る. 無ければ `slotCount` 番目を新しく使い、`generation = 1` とする.
    - 直前に空いたスロットから使うため、キャッシュに乗っていることが多い.
-2. `dense[count]` に書き込み、`denseToSlot[count] = slot`、`slots[slot].Dense = count` とする.
-3. PK = `(Generation << SlotBits) | slot` を返す.
+2. `dense[count]` に書き込み、`denseToSlot[count] = slot`、`slots[slot].dense = count` とする.
+3. PK = `(generation << SlotBits) | slot` を返す.
 
 ### BulkInsert
 
@@ -139,7 +139,7 @@ return ref dense[s.Dense];
 
 1. Find と同様にスロットを確認する. 存在しない / 削除済みの場合は失敗とする.
 2. 対応する二次索引のエントリを削除する.
-3. 末尾の Record (`dense[count - 1]`) を `dense[s.Dense]` に移し、移した Record のスロットの `Dense` を書き換える.
+3. 末尾の Record (`dense[count - 1]`) を `dense[s.dense]` に移し、移した Record のスロットの `dense` を書き換える.
 4. 末尾を `default` で消す (Record が持つ参照を GC に解放させるため).
 5. スロットの世代を進めて空きリストへ戻す (一周した場合は戻さない).
 
