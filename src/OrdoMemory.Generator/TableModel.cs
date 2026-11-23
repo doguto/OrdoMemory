@@ -6,14 +6,14 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace OrdoMemory.Generator
 {
-    internal sealed class FieldModel
+    sealed class FieldModel
     {
         public string name;
         public string type;
         public string parameterName;
     }
 
-    internal sealed class KeyModel
+    sealed class KeyModel
     {
         public FieldModel field;
         public bool hash;
@@ -27,7 +27,7 @@ namespace OrdoMemory.Generator
         public string IndexField => "__" + char.ToLowerInvariant(@field.name[0]) + @field.name.Substring(1) + "Index";
     }
 
-    internal sealed class TableModel
+    sealed class TableModel
     {
         public string namespaceName;
         public string rowName;
@@ -38,8 +38,8 @@ namespace OrdoMemory.Generator
         public string primaryKeyTraits;
         public int slotBits;
         public bool generateConstructor;
-        public List<FieldModel> fields = new();
-        public List<KeyModel> keys = new();
+        public readonly List<FieldModel> fields = new();
+        public readonly List<KeyModel> keys = new();
 
         public static TableModel Create(INamedTypeSymbol type, AttributeData tableAttribute, INamedTypeSymbol keyAttributeType, GeneratorExecutionContext context)
         {
@@ -53,7 +53,8 @@ namespace OrdoMemory.Generator
             }
 
             var isPartial = type.DeclaringSyntaxReferences.All(reference =>
-                reference.GetSyntax() is StructDeclarationSyntax declaration && declaration.Modifiers.Any(SyntaxKind.PartialKeyword));
+                reference.GetSyntax() is StructDeclarationSyntax declaration && declaration.Modifiers.Any(SyntaxKind.PartialKeyword)
+            );
             if (!type.IsReadOnly || !isPartial)
             {
                 context.ReportDiagnostic(Diagnostic.Create(Diagnostics.MustBeReadOnlyPartial, location, type.Name));
@@ -66,12 +67,13 @@ namespace OrdoMemory.Generator
                 rowName = type.Name,
                 rowFullName = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                 tableName = type.Name + "Table",
-                accessibility = type.DeclaredAccessibility == Microsoft.CodeAnalysis.Accessibility.Public ? "public" : "internal"
+                accessibility = type.DeclaredAccessibility == Accessibility.Public ? "public" : "internal"
             };
 
             var usesUInt64PrimaryKey = false;
             var slotBits = 0;
             foreach (var argument in tableAttribute.NamedArguments)
+            {
                 switch (argument.Key)
                 {
                     case "TableName":
@@ -84,6 +86,7 @@ namespace OrdoMemory.Generator
                         slotBits = argument.Value.Value is int bits ? bits : 0;
                         break;
                 }
+            }
 
             model.primaryKeyType = usesUInt64PrimaryKey ? "ulong" : "uint";
             model.primaryKeyTraits = usesUInt64PrimaryKey ? "global::OrdoMemory.UInt64PrimaryKey" : "global::OrdoMemory.UInt32PrimaryKey";
@@ -112,7 +115,7 @@ namespace OrdoMemory.Generator
 
                 if (field.IsImplicitlyDeclared) continue;
 
-                if (field.DeclaredAccessibility != Microsoft.CodeAnalysis.Accessibility.Public && field.DeclaredAccessibility != Microsoft.CodeAnalysis.Accessibility.Internal)
+                if (field.DeclaredAccessibility != Accessibility.Public && field.DeclaredAccessibility != Accessibility.Internal)
                 {
                     context.ReportDiagnostic(Diagnostic.Create(Diagnostics.InaccessibleField, field.Locations.FirstOrDefault(), field.Name));
                     isValid = false;
@@ -135,8 +138,9 @@ namespace OrdoMemory.Generator
                 var key = new KeyModel { field = fieldModel, unique = true };
                 if (keyAttribute.ConstructorArguments.Length > 0 && keyAttribute.ConstructorArguments[0].Value is int indexKind) key.hash = indexKind == 1;
                 foreach (var argument in keyAttribute.NamedArguments)
-                    if (argument.Key == "Unique" && argument.Value.Value is bool unique)
-                        key.unique = unique;
+                {
+                    if (argument.Key == "Unique" && argument.Value.Value is bool unique) key.unique = unique;
+                }
 
                 if (!TryMapKeyType(field.Type, key))
                 {
