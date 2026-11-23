@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace OrdoMemory.Generator
+namespace OrdoMemory.Generator.Emitting
 {
     internal static class TemplateFunctions
     {

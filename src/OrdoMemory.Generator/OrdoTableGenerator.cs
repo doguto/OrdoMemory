@@ -4,6 +4,8 @@ using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
+using OrdoMemory.Generator.Emitting;
+using OrdoMemory.Generator.Models;
 
 namespace OrdoMemory.Generator
 {

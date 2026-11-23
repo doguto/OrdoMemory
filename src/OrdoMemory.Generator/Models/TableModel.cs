@@ -4,54 +4,62 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
-namespace OrdoMemory.Generator
+namespace OrdoMemory.Generator.Models
 {
-    sealed class FieldModel
-    {
-        public string name;
-        public string type;
-        public string parameterName;
-    }
-
-    sealed class KeyModel
-    {
-        public FieldModel field;
-        public bool hash;
-        public bool unique;
-
-        public string keyType;
-        public string keyTraits;
-        public string convert;
-        public bool keyIsReference;
-
-        public string IndexField => "__" + char.ToLowerInvariant(@field.name[0]) + @field.name.Substring(1) + "Index";
-    }
-
     sealed class TableModel
     {
-        public string namespaceName;
-        public string rowName;
-        public string rowFullName;
-        public string tableName;
-        public string accessibility;
-        public string primaryKeyType;
-        public string primaryKeyTraits;
-        public int slotBits;
-        public bool generateConstructor;
-        public readonly List<FieldModel> fields = new();
-        public readonly List<KeyModel> keys = new();
+        public TableModel(
+            string namespaceName,
+            string rowName,
+            string rowFullName,
+            string tableName,
+            string accessibility,
+            bool usesUInt64PrimaryKey,
+            int slotBits,
+            IReadOnlyList<FieldModel> fields,
+            IReadOnlyList<KeyModel> keys,
+            bool generateConstructor
+        )
+        {
+            NamespaceName = namespaceName;
+            RowName = rowName;
+            RowFullName = rowFullName;
+            TableName = tableName;
+            Accessibility = accessibility;
+            PrimaryKeyType = PrimaryKeyTypeOf(usesUInt64PrimaryKey);
+            PrimaryKeyTraits = usesUInt64PrimaryKey ? "global::OrdoMemory.UInt64PrimaryKey" : "global::OrdoMemory.UInt32PrimaryKey";
+            SlotBits = slotBits;
+            Fields = fields;
+            Keys = keys;
+            GenerateConstructor = generateConstructor;
+        }
+
+        public string NamespaceName { get; }
+        public string RowName { get; }
+        public string RowFullName { get; }
+        public string TableName { get; }
+        public string Accessibility { get; }
+        public string PrimaryKeyType { get; }
+        public string PrimaryKeyTraits { get; }
+        public int SlotBits { get; }
+        public IReadOnlyList<FieldModel> Fields { get; }
+        public IReadOnlyList<KeyModel> Keys { get; }
+        public bool GenerateConstructor { get; }
+
+        static string PrimaryKeyTypeOf(bool usesUInt64PrimaryKey) => usesUInt64PrimaryKey ? "ulong" : "uint";
 
         public static TableModel Create(INamedTypeSymbol type, AttributeData tableAttribute, INamedTypeSymbol keyAttributeType, GeneratorExecutionContext context)
         {
             var location = type.Locations.FirstOrDefault();
-            var isValid = true;
 
+            // ネスト型と Generics 型を Row にすることを禁止する
             if (type.ContainingType != null || type.IsGenericType)
             {
                 context.ReportDiagnostic(Diagnostic.Create(Diagnostics.UnsupportedDeclaration, location, type.Name));
                 return null;
             }
 
+            // readonly かつ partial であることを確認する
             var isPartial = type.DeclaringSyntaxReferences.All(reference =>
                 reference.GetSyntax() is StructDeclarationSyntax declaration && declaration.Modifiers.Any(SyntaxKind.PartialKeyword)
             );
@@ -61,15 +69,8 @@ namespace OrdoMemory.Generator
                 return null;
             }
 
-            var model = new TableModel
-            {
-                namespaceName = type.ContainingNamespace.IsGlobalNamespace ? null : type.ContainingNamespace.ToDisplayString(),
-                rowName = type.Name,
-                rowFullName = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                tableName = type.Name + "Table",
-                accessibility = type.DeclaredAccessibility == Accessibility.Public ? "public" : "internal"
-            };
-
+            var isValid = true;
+            var tableName = type.Name + "Table";
             var usesUInt64PrimaryKey = false;
             var slotBits = 0;
             foreach (var argument in tableAttribute.NamedArguments)
@@ -77,7 +78,7 @@ namespace OrdoMemory.Generator
                 switch (argument.Key)
                 {
                     case "TableName":
-                        if (argument.Value.Value is string name && name.Length > 0) model.tableName = name;
+                        if (argument.Value.Value is string name && name.Length > 0) tableName = name;
                         break;
                     case "PrimaryKey":
                         usesUInt64PrimaryKey = argument.Value.Value is int primaryKeyKind && primaryKeyKind == 1;
@@ -88,20 +89,17 @@ namespace OrdoMemory.Generator
                 }
             }
 
-            model.primaryKeyType = usesUInt64PrimaryKey ? "ulong" : "uint";
-            model.primaryKeyTraits = usesUInt64PrimaryKey ? "global::OrdoMemory.UInt64PrimaryKey" : "global::OrdoMemory.UInt32PrimaryKey";
-
             var minimumSlotBits = usesUInt64PrimaryKey ? 32 : 1;
             var maximumSlotBits = usesUInt64PrimaryKey ? 63 : 31;
             if (slotBits == 0) slotBits = usesUInt64PrimaryKey ? 32 : 22;
             if (slotBits < minimumSlotBits || slotBits > maximumSlotBits)
             {
-                context.ReportDiagnostic(Diagnostic.Create(Diagnostics.InvalidSlotBits, location, slotBits, model.primaryKeyType, $"{minimumSlotBits}..{maximumSlotBits}"));
+                context.ReportDiagnostic(Diagnostic.Create(Diagnostics.InvalidSlotBits, location, slotBits, PrimaryKeyTypeOf(usesUInt64PrimaryKey), $"{minimumSlotBits}..{maximumSlotBits}"));
                 isValid = false;
             }
 
-            model.slotBits = slotBits;
-
+            var fields = new List<FieldModel>();
+            var keys = new List<KeyModel>();
             foreach (var member in type.GetMembers())
             {
                 if (!(member is IFieldSymbol field) || field.IsStatic || field.IsConst) continue;
@@ -115,44 +113,37 @@ namespace OrdoMemory.Generator
 
                 if (field.IsImplicitlyDeclared) continue;
 
-                if (field.DeclaredAccessibility != Accessibility.Public && field.DeclaredAccessibility != Accessibility.Internal)
+                if (field.DeclaredAccessibility != Microsoft.CodeAnalysis.Accessibility.Public && field.DeclaredAccessibility != Microsoft.CodeAnalysis.Accessibility.Internal)
                 {
                     context.ReportDiagnostic(Diagnostic.Create(Diagnostics.InaccessibleField, field.Locations.FirstOrDefault(), field.Name));
                     isValid = false;
                     continue;
                 }
 
-                var fieldModel = new FieldModel
-                {
-                    name = field.Name,
-                    type = field.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                    parameterName = "@" + char.ToLowerInvariant(field.Name[0]) + field.Name.Substring(1)
-                };
-                // 生成する Update の引数 primaryKey と衝突させない
-                if (fieldModel.parameterName == "@primaryKey") fieldModel.parameterName = "@primaryKeyValue";
-                model.fields.Add(fieldModel);
+                var fieldModel = new FieldModel(field.Name, field.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+                fields.Add(fieldModel);
 
                 var keyAttribute = field.GetAttributes().FirstOrDefault(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, keyAttributeType));
                 if (keyAttribute == null) continue;
 
-                var key = new KeyModel { field = fieldModel, unique = true };
-                if (keyAttribute.ConstructorArguments.Length > 0 && keyAttribute.ConstructorArguments[0].Value is int indexKind) key.hash = indexKind == 1;
+                var hash = keyAttribute.ConstructorArguments.Length > 0 && keyAttribute.ConstructorArguments[0].Value is int indexKind && indexKind == 1;
+                var unique = true;
                 foreach (var argument in keyAttribute.NamedArguments)
                 {
-                    if (argument.Key == "Unique" && argument.Value.Value is bool unique) key.unique = unique;
+                    if (argument.Key == "Unique" && argument.Value.Value is bool value) unique = value;
                 }
 
-                if (!TryMapKeyType(field.Type, key))
+                if (!TryMapKeyType(field.Type, out var mapping))
                 {
                     context.ReportDiagnostic(Diagnostic.Create(Diagnostics.UnsupportedKeyType, field.Locations.FirstOrDefault(), field.Name, field.Type.ToDisplayString()));
                     isValid = false;
                     continue;
                 }
 
-                model.keys.Add(key);
+                keys.Add(new KeyModel(fieldModel, hash, unique, mapping));
             }
 
-            if (model.fields.Count == 0 && isValid)
+            if (fields.Count == 0 && isValid)
             {
                 context.ReportDiagnostic(Diagnostic.Create(Diagnostics.NoFields, location, type.Name));
                 isValid = false;
@@ -160,14 +151,25 @@ namespace OrdoMemory.Generator
 
             if (!isValid) return null;
 
-            model.generateConstructor = !type.InstanceConstructors.Any(constructor =>
-                constructor.Parameters.Length == model.fields.Count &&
+            var generateConstructor = !type.InstanceConstructors.Any(constructor =>
+                constructor.Parameters.Length == fields.Count &&
                 constructor.Parameters.Select(parameter => parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat))
-                           .SequenceEqual(model.fields.Select(fieldModel => fieldModel.type)));
-            return model;
+                           .SequenceEqual(fields.Select(fieldModel => fieldModel.Type)));
+
+            return new TableModel(
+                type.ContainingNamespace.IsGlobalNamespace ? null : type.ContainingNamespace.ToDisplayString(),
+                type.Name,
+                type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                tableName,
+                type.DeclaredAccessibility == Microsoft.CodeAnalysis.Accessibility.Public ? "public" : "internal",
+                usesUInt64PrimaryKey,
+                slotBits,
+                fields,
+                keys,
+                generateConstructor);
         }
 
-        static bool TryMapKeyType(ITypeSymbol type, KeyModel key)
+        static bool TryMapKeyType(ITypeSymbol type, out KeyTypeMapping mapping)
         {
             var specialType = type.SpecialType;
             var needsCast = true;
@@ -177,7 +179,7 @@ namespace OrdoMemory.Generator
             }
             else if (specialType == SpecialType.System_Boolean)
             {
-                SetKeyMapping(key, "int", "Int32Key", "({0} ? 1 : 0)");
+                mapping = new KeyTypeMapping("int", "Int32Key", "({0} ? 1 : 0)");
                 return true;
             }
             else
@@ -193,33 +195,26 @@ namespace OrdoMemory.Generator
                 case SpecialType.System_UInt16:
                 case SpecialType.System_Char:
                 case SpecialType.System_Int32:
-                    SetKeyMapping(key, "int", "Int32Key", specialType == SpecialType.System_Int32 && !needsCast ? "{0}" : "(int){0}");
+                    mapping = new KeyTypeMapping("int", "Int32Key", specialType == SpecialType.System_Int32 && !needsCast ? "{0}" : "(int){0}");
                     return true;
                 case SpecialType.System_UInt32:
                 case SpecialType.System_Int64:
-                    SetKeyMapping(key, "long", "Int64Key", specialType == SpecialType.System_Int64 && !needsCast ? "{0}" : "(long){0}");
+                    mapping = new KeyTypeMapping("long", "Int64Key", specialType == SpecialType.System_Int64 && !needsCast ? "{0}" : "(long){0}");
                     return true;
                 case SpecialType.System_UInt64:
-                    SetKeyMapping(key, "ulong", "UInt64Key", needsCast ? "(ulong){0}" : "{0}");
+                    mapping = new KeyTypeMapping("ulong", "UInt64Key", needsCast ? "(ulong){0}" : "{0}");
                     return true;
                 case SpecialType.System_Single:
                 case SpecialType.System_Double:
-                    SetKeyMapping(key, "double", "DoubleKey", "global::OrdoMemory.KeyConvert.Double({0})");
+                    mapping = new KeyTypeMapping("double", "DoubleKey", "global::OrdoMemory.KeyConvert.Double({0})");
                     return true;
                 case SpecialType.System_String:
-                    SetKeyMapping(key, "string", "StringKey", "{0}");
-                    key.keyIsReference = true;
+                    mapping = new KeyTypeMapping("string", "StringKey", "{0}", isReference: true);
                     return true;
                 default:
+                    mapping = default;
                     return false;
             }
-        }
-
-        static void SetKeyMapping(KeyModel key, string keyType, string traits, string convert)
-        {
-            key.keyType = keyType;
-            key.keyTraits = "global::OrdoMemory." + traits;
-            key.convert = convert;
         }
     }
 }

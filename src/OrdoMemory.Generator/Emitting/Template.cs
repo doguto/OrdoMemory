@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Text;
 
-namespace OrdoMemory.Generator
+namespace OrdoMemory.Generator.Emitting
 {
     // 複数行の埋め込みを穴の位置のインデントに揃え、空の埋め込みだけの行は出力しない
     [InterpolatedStringHandler]
