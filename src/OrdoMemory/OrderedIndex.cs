@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
 namespace OrdoMemory
@@ -19,10 +20,11 @@ namespace OrdoMemory
     //
     // キーの表現:
     // - norm はキーを順序を保って ulong に正規化した値。NeedsFullComparison のときだけ *Full に元のキーを持ち、norm が等しい場合に比較する。
-    // - packsPk (非ユニークかつ NormalizedBits + pkBits <= 64) のとき norm = (正規化キー << pkBits) | 主キー とし、
+    // - packsPk (非ユニークかつ !NeedsFullComparison かつ NormalizedBits + pkBits <= 64) のとき norm = (正規化キー << pkBits) | 主キー とし、
     //   主キーは norm の下位 pkBits ビットから復元する。このとき leafPk / innerPk は確保しない。
     // - comparesPk (非ユニークで pack できない) のときは leafPk / innerPk を持ち、キーが等しいエントリを主キーで順序付ける。
     // - ユニークの場合は主キーを比較に使わないため innerPk を持たない。
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public sealed class OrderedIndex<TKey, TKeyTraits, TPrimaryKey, TPrimaryKeyTraits>
         where TKeyTraits : struct, IOrderedKeyTraits<TKey>
         where TPrimaryKey : unmanaged
@@ -73,7 +75,8 @@ namespace OrdoMemory
             this.unique = unique;
             pkBits = default(TPrimaryKeyTraits).Bits;
             pkMask = pkBits == 64 ? ulong.MaxValue : (1UL << pkBits) - 1;
-            packsPk = !unique && default(TKeyTraits).NormalizedBits + pkBits <= 64;
+            // 正規化値が順序を確定しないキー (NeedsFullComparison) では、PK を下位 bit に詰めると正規化値の比較だけで (prefix, PK) 順に並んでしまい、フルキー順にならないため詰めない
+            packsPk = !unique && !NeedsFullComparison && default(TKeyTraits).NormalizedBits + pkBits <= 64;
             comparesPk = !unique && !packsPk;
             Reset(4, 4);
         }

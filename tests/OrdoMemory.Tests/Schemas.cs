@@ -52,3 +52,43 @@ namespace OrdoMemory.Tests
         [SecondaryKey] public readonly int Value;
     }
 }
+
+// 生成ファイルのヒント名が衝突しないことの確認用 (OrdoMemory.Tests.HintName.A_B と OrdoMemory.Tests.HintName_A.B)
+namespace OrdoMemory.Tests.HintName
+{
+    [OrdoTable]
+    public readonly partial struct A_B
+    {
+        [PrimaryKey] public readonly uint Id;
+
+        public readonly int Value;
+    }
+
+    // 大文字小文字だけが違う型
+    [OrdoTable]
+    public readonly partial struct CaseRow
+    {
+        [PrimaryKey] public readonly uint Id;
+
+        public readonly int Value;
+    }
+
+    [OrdoTable]
+    public readonly partial struct caseRow
+    {
+        [PrimaryKey] public readonly uint Id;
+
+        public readonly int Value;
+    }
+}
+
+namespace OrdoMemory.Tests.HintName_A
+{
+    [OrdoTable]
+    public readonly partial struct B
+    {
+        [PrimaryKey] public readonly uint Id;
+
+        public readonly int Value;
+    }
+}
