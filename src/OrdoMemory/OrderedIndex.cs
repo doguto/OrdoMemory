@@ -1,10 +1,12 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
 namespace OrdoMemory
 {
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public sealed class OrderedIndex<TKey, TKeyTraits, TPrimaryKey, TPrimaryKeyTraits>
         where TKeyTraits : struct, IOrderedKeyTraits<TKey>
         where TPrimaryKey : unmanaged

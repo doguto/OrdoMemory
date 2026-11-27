@@ -1,8 +1,10 @@
 using System;
+using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
 namespace OrdoMemory
 {
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public sealed partial class RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits>
         where TRow : struct, IRow<TRow, TPrimaryKey>
         where TPrimaryKey : unmanaged
@@ -92,10 +94,14 @@ namespace OrdoMemory
             return ref dense[denseIndex];
         }
 
+        // 格納済みの PK から dense の位置を求める. 格納されていない PK (削除済み・無効値) は例外にする
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int GetIndex(TPrimaryKey primaryKey)
         {
-            return slots[(int)(default(TPrimaryKeyTraits).ToUInt64(primaryKey) & slotMask)].dense;
+            var value = default(TPrimaryKeyTraits).ToUInt64(primaryKey);
+            ref var s = ref slots[(int)(value & slotMask)];
+            if (s.generation != value >> slotBits || s.generation == 0) ThrowHelper.ThrowInvalidPrimaryKey(nameof(primaryKey));
+            return s.dense;
         }
 
         // Insert 前に挿入する個数分の空き容量があることを確認する
@@ -112,8 +118,11 @@ namespace OrdoMemory
             return true;
         }
 
+        // 事前に TryReserve で容量を確保しておくこと
         public TPrimaryKey Store(in TRow row)
         {
+            if (denseCount >= dense.Length || (freeHead < 0 && slotCount >= slots.Length)) ThrowHelper.ThrowNotReserved();
+
             int slot;
             if (freeHead >= 0)
             {
@@ -136,6 +145,8 @@ namespace OrdoMemory
 
         public void Remove(int denseIndex)
         {
+            if ((uint)denseIndex >= (uint)denseCount) ThrowHelper.ThrowArgumentOutOfRange(nameof(denseIndex));
+
             var slotIndex = SlotIndexOf(denseIndex);
             var last = denseCount - 1;
             if (denseIndex != last)
