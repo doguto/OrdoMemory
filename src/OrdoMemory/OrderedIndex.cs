@@ -474,17 +474,121 @@ namespace OrdoMemory
             lCount[leaf] = n;
             count--;
 
-            if (n == 0 && height > 0)
+            if (height == 0) return true;
+
+            if (n == 0)
             {
-                var prev = lPrev[leaf];
-                var next = lNext[leaf];
-                if (prev >= 0) lNext[prev] = next;
-                if (next >= 0) lPrev[next] = prev;
-                FreeLeaf(leaf);
+                UnlinkAndFreeLeaf(leaf);
                 RemoveFromParent(1);
+            }
+            else if (n <= b / 4)
+            {
+                Rebalance(leaf, n);
             }
 
             return true;
+        }
+
+        // 充填が 1/4 以下になった葉を、同じ親の隣の葉と併合するか、隣の葉から借りて均す.
+        // 触るのは葉 2 枚と親 1 つだけなので O(b) で済む. 内部ノードは空になるまで縮めない.
+        void Rebalance(int leaf, int n)
+        {
+            var parent = pathNode[1];
+            var pos = pathPos[1];
+            var parentBase = parent * b;
+            if (pos > 0)
+            {
+                var left = iChild[parentBase + pos - 1];
+                var s = lCount[left];
+                if (s + n <= b)
+                {
+                    // 左の葉の末尾へ移し、この葉を外す.
+                    CopyLeafEntries(leaf, 0, left, s, n);
+                    lCount[left] = s + n;
+                    lCount[leaf] = 0;
+                    UnlinkAndFreeLeaf(leaf);
+                    RemoveFromParent(1);
+                    return;
+                }
+
+                // 左の葉の末尾から借りる. この葉の最小キーが変わるため区切りを更新する.
+                var m = (s - n) / 2;
+                CopyLeafEntries(leaf, 0, leaf, m, n);
+                CopyLeafEntries(left, s - m, leaf, 0, m);
+                lCount[left] = s - m;
+                lCount[leaf] = n + m;
+                SetSeparator(parentBase + pos, leaf);
+                return;
+            }
+
+            if (pos + 1 < iCount[parent])
+            {
+                var right = iChild[parentBase + pos + 1];
+                var s = lCount[right];
+                if (s + n <= b)
+                {
+                    // 右の葉をこの葉の末尾へ移し、右の葉を外す.
+                    CopyLeafEntries(right, 0, leaf, n, s);
+                    lCount[leaf] = n + s;
+                    lCount[right] = 0;
+                    UnlinkAndFreeLeaf(right);
+                    pathPos[1] = pos + 1;
+                    RemoveFromParent(1);
+                    return;
+                }
+
+                // 右の葉の先頭から借りる. 右の葉の最小キーが変わるため区切りを更新する.
+                var m = (s - n) / 2;
+                CopyLeafEntries(right, 0, leaf, n, m);
+                CopyLeafEntries(right, m, right, 0, s - m);
+                lCount[leaf] = n + m;
+                lCount[right] = s - m;
+                SetSeparator(parentBase + pos + 1, right);
+            }
+        }
+
+        // 重なりのある移動にも使える. 移動元で使わなくなった範囲のキーは消す.
+        void CopyLeafEntries(int from, int fromPos, int to, int toPos, int n)
+        {
+            if (n <= 0) return;
+            var src = from * b + fromPos;
+            var dst = to * b + toPos;
+            Array.Copy(lNorm, src, lNorm, dst, n);
+            if (NeedsFullComparison)
+            {
+                Array.Copy(lFull, src, lFull, dst, n);
+                if (src + n <= dst || dst + n <= src)
+                {
+                    Array.Clear(lFull, src, n);
+                }
+                else if (src < dst)
+                {
+                    Array.Clear(lFull, src, dst - src);
+                }
+                else
+                {
+                    Array.Clear(lFull, dst + n, src - dst);
+                }
+            }
+
+            if (!packsPk) Array.Copy(lPk, src, lPk, dst, n);
+        }
+
+        void SetSeparator(int innerSlot, int leaf)
+        {
+            var ls = leaf * b;
+            iNorm[innerSlot] = lNorm[ls];
+            if (NeedsFullComparison) iFull[innerSlot] = lFull[ls];
+            if (comparesPk) iPk[innerSlot] = ToU(lPk[ls]);
+        }
+
+        void UnlinkAndFreeLeaf(int leaf)
+        {
+            var prev = lPrev[leaf];
+            var next = lNext[leaf];
+            if (prev >= 0) lNext[prev] = next;
+            if (next >= 0) lPrev[next] = prev;
+            FreeLeaf(leaf);
         }
 
         void RemoveFromParent(int level)
