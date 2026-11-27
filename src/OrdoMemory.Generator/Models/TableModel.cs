@@ -8,6 +8,17 @@ namespace OrdoMemory.Generator.Models
 {
     sealed class TableModel
     {
+        // uint の PK の既定の配分: スロット 22 bit + 世代 10 bit.
+        // 同時に持てる件数 (2^22 = 約 419 万) と、同じスロットを再利用できる回数 (2^10 - 1 = 1023 回) の釣り合いを取った値.
+        const int DefaultUInt32SlotBits = 22;
+
+        // ulong の PK の既定の配分: スロット 32 bit + 世代 32 bit.
+        // 件数は配列の長さ (int) で頭打ちになるためスロットは 32 bit あれば足り、残りをすべて世代に回す (約 43 億回).
+        const int DefaultUInt64SlotBits = 32;
+
+        // ulong の PK で世代を 32 bit より広くしても、RowStore が世代を uint で持つため使い切れない
+        const int MinimumUInt64SlotBits = 32;
+
         public TableModel(
             string namespaceName,
             string rowName,
@@ -83,7 +94,7 @@ namespace OrdoMemory.Generator.Models
                     case "TableName":
                         if (argument.Value.Value is string name && name.Length > 0) tableName = name;
                         break;
-                    case "PrimaryKey":
+                    case "PrimaryKeyType":
                         usesUInt64PrimaryKey = argument.Value.Value is int primaryKeyKind && primaryKeyKind == 1;
                         break;
                     case "SlotBits":
@@ -92,9 +103,9 @@ namespace OrdoMemory.Generator.Models
                 }
             }
 
-            var minimumSlotBits = usesUInt64PrimaryKey ? 32 : 1;
+            var minimumSlotBits = usesUInt64PrimaryKey ? MinimumUInt64SlotBits : 1;
             var maximumSlotBits = usesUInt64PrimaryKey ? 63 : 31;
-            if (slotBits == 0) slotBits = usesUInt64PrimaryKey ? 32 : 22;
+            if (slotBits == 0) slotBits = usesUInt64PrimaryKey ? DefaultUInt64SlotBits : DefaultUInt32SlotBits;
             if (slotBits < minimumSlotBits || slotBits > maximumSlotBits)
             {
                 context.ReportDiagnostic(Diagnostic.Create(Diagnostics.InvalidSlotBits, location, slotBits, PrimaryKeyTypeOf(usesUInt64PrimaryKey), $"{minimumSlotBits}..{maximumSlotBits}"));

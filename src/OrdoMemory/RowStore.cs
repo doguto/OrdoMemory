@@ -9,6 +9,7 @@ namespace OrdoMemory
         where TPrimaryKeyTraits : struct, IPrimaryKeyTraits<TPrimaryKey>
     {
         const int MinGrowLength = 4; // データ配列の長さ更新時の更新量の下限
+        // .NET の Array.MaxLength (1 次元配列の要素数の上限) と同じ値. netstandard2.1 には Array.MaxLength が無いため定数で持つ
         const int MaxArrayLength = 0x7FFFFFC7;
 
         // 生データを示す dense 配列の Index を持つ構造体
