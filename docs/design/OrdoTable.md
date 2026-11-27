@@ -262,6 +262,8 @@ public sealed class SampleTable
 - 列挙は struct で返す (`foreach (ref readonly var row in table.All())`).
 - 比較子は struct をジェネリクスで受けるか、生成コードに埋め込む (仮想呼び出しを避けるため).
 - 単一スレッド前提とする.
+- 生成コードが使う実装用の型 (`RowStore`, 索引, traits, `KeyConvert`, `KeyComparer` 等) は、生成コードから参照するため public だが、`[EditorBrowsable(EditorBrowsableState.Never)]` を付けて補完に出さない. 利用者が直接使うことは想定しない.
+  - `RowStore` の `Store` / `Remove` / `GetIndex` は前提 (容量の確保、添字の範囲、PK が格納済みであること) を検査し、満たさなければ例外を投げる.
 
 ---
 
