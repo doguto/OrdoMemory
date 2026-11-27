@@ -85,7 +85,11 @@ namespace OrdoMemory.Generator.Models
 
             var isValid = true;
             var tableName = type.Name + "Table";
-            var usesUInt64PrimaryKey = false;
+            // PK の型は [PrimaryKey] を付けたフィールドの型 (uint / ulong) から決める
+            var usesUInt64PrimaryKey = type.GetMembers().OfType<IFieldSymbol>().Any(field =>
+                !field.IsStatic &&
+                field.Type.SpecialType == SpecialType.System_UInt64 &&
+                field.GetAttributes().Any(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, primaryKeyAttributeType)));
             var slotBits = 0;
             foreach (var argument in tableAttribute.NamedArguments)
             {
@@ -93,9 +97,6 @@ namespace OrdoMemory.Generator.Models
                 {
                     case "TableName":
                         if (argument.Value.Value is string name && name.Length > 0) tableName = name;
-                        break;
-                    case "PrimaryKeyType":
-                        usesUInt64PrimaryKey = argument.Value.Value is int primaryKeyKind && primaryKeyKind == 1;
                         break;
                     case "SlotBits":
                         slotBits = argument.Value.Value is int bits ? bits : 0;
@@ -143,10 +144,9 @@ namespace OrdoMemory.Generator.Models
                     primaryKeyCount++;
                     primaryKeyField = field.Name;
 
-                    var primaryKeySpecialType = usesUInt64PrimaryKey ? SpecialType.System_UInt64 : SpecialType.System_UInt32;
-                    if (field.Type.SpecialType != primaryKeySpecialType)
+                    if (field.Type.SpecialType != SpecialType.System_UInt32 && field.Type.SpecialType != SpecialType.System_UInt64)
                     {
-                        context.ReportDiagnostic(Diagnostic.Create(Diagnostics.PrimaryKeyType, field.Locations.FirstOrDefault(), field.Name, PrimaryKeyTypeOf(usesUInt64PrimaryKey)));
+                        context.ReportDiagnostic(Diagnostic.Create(Diagnostics.PrimaryKeyType, field.Locations.FirstOrDefault(), field.Name));
                         isValid = false;
                     }
 

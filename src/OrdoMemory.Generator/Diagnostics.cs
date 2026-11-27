@@ -48,7 +48,7 @@ namespace OrdoMemory.Generator
 
         public static readonly DiagnosticDescriptor PrimaryKeyType = new(
             "OM009", "Invalid PrimaryKey type",
-            "PrimaryKey '{0}' must be of type '{1}'",
+            "PrimaryKey '{0}' must be of type 'uint' or 'ulong'",
             Category, DiagnosticSeverity.Error, true);
 
         public static readonly DiagnosticDescriptor PrimaryKeyIsSecondaryKey = new(
