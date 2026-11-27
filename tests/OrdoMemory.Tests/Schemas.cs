@@ -51,4 +51,22 @@ namespace OrdoMemory.Tests
 
         [SecondaryKey] public readonly int Value;
     }
+
+    // readonly struct ではなく、キー以外のフィールドを UpdateRef で書き換えられる
+    [OrdoTable]
+    public partial struct Character
+    {
+        [PrimaryKey] public readonly uint Id;
+
+        [SecondaryKey] public readonly int Code;
+
+        [SecondaryKey(IndexKind.Hash, Unique = false)]
+        public readonly int Team;
+
+        public int Hp;
+
+        public string Note;
+
+        public readonly bool IsAlive() => Hp > 0;
+    }
 }

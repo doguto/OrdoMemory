@@ -19,7 +19,8 @@ namespace OrdoMemory.Generator.Models
             string primaryKeyField,
             IReadOnlyList<FieldModel> fields,
             IReadOnlyList<KeyModel> keys,
-            bool generateConstructor
+            bool generateConstructor,
+            bool hasMutableField
         )
         {
             NamespaceName = namespaceName;
@@ -34,6 +35,7 @@ namespace OrdoMemory.Generator.Models
             Fields = fields;
             Keys = keys;
             GenerateConstructor = generateConstructor;
+            HasMutableField = hasMutableField;
         }
 
         public string NamespaceName { get; }
@@ -48,6 +50,7 @@ namespace OrdoMemory.Generator.Models
         public IReadOnlyList<FieldModel> Fields { get; }
         public IReadOnlyList<KeyModel> Keys { get; }
         public bool GenerateConstructor { get; }
+        public bool HasMutableField { get; }
 
         static string PrimaryKeyTypeOf(bool usesUInt64PrimaryKey) => usesUInt64PrimaryKey ? "ulong" : "uint";
 
@@ -62,15 +65,18 @@ namespace OrdoMemory.Generator.Models
                 return null;
             }
 
-            // readonly かつ partial であることを確認する
+            // partial であることを確認する. readonly struct でなくてもよい (キー以外のフィールドを UpdateRef で書き換えられるようにするため)
             var isPartial = type.DeclaringSyntaxReferences.All(reference =>
                 reference.GetSyntax() is StructDeclarationSyntax declaration && declaration.Modifiers.Any(SyntaxKind.PartialKeyword)
             );
-            if (!type.IsReadOnly || !isPartial)
+            if (!isPartial)
             {
-                context.ReportDiagnostic(Diagnostic.Create(Diagnostics.MustBeReadOnlyPartial, location, type.Name));
+                context.ReportDiagnostic(Diagnostic.Create(Diagnostics.MustBePartial, location, type.Name));
                 return null;
             }
+
+            // readonly struct でない場合、readonly でないメンバーを ref readonly / in 越しに呼ぶと隠れたコピーが起きるため警告する
+            if (!type.IsReadOnly) ReportNonReadOnlyMembers(type, context);
 
             var isValid = true;
             var tableName = type.Name + "Table";
@@ -103,6 +109,7 @@ namespace OrdoMemory.Generator.Models
 
             string primaryKeyField = null;
             var primaryKeyCount = 0;
+            var hasMutableField = false;
             var fields = new List<FieldModel>();
             var keys = new List<KeyModel>();
             foreach (var member in type.GetMembers())
@@ -127,7 +134,18 @@ namespace OrdoMemory.Generator.Models
 
                 var keyAttribute = field.GetAttributes().FirstOrDefault(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, keyAttributeType));
 
-                if (field.GetAttributes().Any(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, primaryKeyAttributeType)))
+                var isPrimaryKey = field.GetAttributes().Any(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, primaryKeyAttributeType));
+
+                // PK と SecondaryKey は索引・スロット表と食い違わないよう、Update 以外で書き換えられないようにする
+                if ((isPrimaryKey || keyAttribute != null) && !field.IsReadOnly)
+                {
+                    context.ReportDiagnostic(Diagnostic.Create(Diagnostics.KeyFieldMustBeReadOnly, field.Locations.FirstOrDefault(), field.Name));
+                    isValid = false;
+                }
+
+                if (!field.IsReadOnly) hasMutableField = true;
+
+                if (isPrimaryKey)
                 {
                     primaryKeyCount++;
                     primaryKeyField = field.Name;
@@ -200,7 +218,26 @@ namespace OrdoMemory.Generator.Models
                 primaryKeyField,
                 fields,
                 keys,
-                generateConstructor);
+                generateConstructor,
+                hasMutableField);
+        }
+
+        static void ReportNonReadOnlyMembers(INamedTypeSymbol type, GeneratorExecutionContext context)
+        {
+            foreach (var member in type.GetMembers())
+            {
+                if (member.IsStatic || member.IsImplicitlyDeclared) continue;
+
+                switch (member)
+                {
+                    case IMethodSymbol method when method.MethodKind == MethodKind.Ordinary && !method.IsReadOnly:
+                        context.ReportDiagnostic(Diagnostic.Create(Diagnostics.MemberShouldBeReadOnly, method.Locations.FirstOrDefault(), type.Name, method.Name));
+                        break;
+                    case IPropertySymbol property when property.GetMethod != null && !property.GetMethod.IsReadOnly:
+                        context.ReportDiagnostic(Diagnostic.Create(Diagnostics.MemberShouldBeReadOnly, property.Locations.FirstOrDefault(), type.Name, property.Name));
+                        break;
+                }
+            }
         }
 
         static bool TryMapKeyType(ITypeSymbol type, out KeyTypeMapping mapping)

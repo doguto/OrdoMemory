@@ -60,8 +60,13 @@ int freeHead;
 - スキーマから struct を生成し、テーブルが唯一の実体を持つ.
   - Record ごとのオブジェクトヘッダと参照が無くなり、GC が管理するオブジェクトも配列数本だけになる.
   - 値で受け取るため、同じインスタンスを二重に Insert するという問題が起こり得ない.
-- メンバには `readonly` を付ける. `ref readonly` / `in` で受け取ったときの隠れたコピー (defensive copy) を防ぐため.
-- 書き換えは Update 経由のみとする. 索引との食い違いを防ぐため.
+- `partial struct` とする. `readonly struct` でもよい.
+- PK と SecondaryKey のフィールドには `readonly` を必須とする (OM011). 索引・スロット表との食い違いを防ぐため, これらの書き換えは Update 経由のみとする.
+- キー以外のフィールドは `readonly` を外してよい. 外したフィールドは `UpdateRef` で得た参照からその場で書き換えられる.
+  - Update は変更が無いフィールドも含めて Record 全体を作り直して上書きするため, 大きな Record の一部だけを頻繁に書き換えると遅い (64 フィールド・約 260B の Record で 1 フィールドの更新が約 95ns に対し, その場で書き換えると約 43ns).
+  - 検索 (`FindRef` など) は従来どおり `ref readonly` で返すため, 検索結果からは書き換えられない.
+- `readonly struct` でない場合, 利用者が定義するメソッド・プロパティには `readonly` 修飾子を付ける (付けなければ OM012 の警告). `ref readonly` / `in` で受け取ったときの隠れたコピー (defensive copy) を防ぐため. フィールドの読み取りではコピーは起きない.
+  - 生成するメンバー (`IRow` の実装) には `readonly` を付ける.
 - `[PrimaryKey]` を付けたフィールドを必ず 1 つ持つ. 型は PK の型 (`uint` / `ulong`) と一致させる.
   - フィールドは利用者が宣言する. 生成コードで追加すると partial struct のフィールドが複数の宣言に分かれ、並び順が定義されなくなるため (CS0282).
   - PK は Insert で払い出されるまで決まらない. 生成するコンストラクタは PK を引数に取らず、Insert / BulkInsert で払い出した PK を差し込んだコピーを格納する. Insert 時に渡された値は無視する.
@@ -156,10 +161,11 @@ return ref dense[s.dense];
 
 - 初期容量は構築時に指定する. `count` が容量に達した場合、配列を倍に拡張する.
 - `TrimExcess` で余った容量を返す.
-- 次の操作の後は、`ref readonly` で受け取った参照を取り直す.
+- 次の操作の後は、`ref readonly` / `UpdateRef` で受け取った参照を取り直す.
   - Remove: 末尾の Record が移動するため.
   - Insert / BulkInsert: 配列の拡張で再確保されるため.
 - 列挙中の Insert / Remove は `version` で検出し、例外とする.
+  - `UpdateRef` によるその場での書き換えは構造を変えないため, 列挙中でも行える.
 
 ---
 
@@ -224,6 +230,7 @@ MySQL (InnoDB) の二次索引と同様に、B+Tree のキーを `(SecondaryKey,
 | Insert         | 新規 Record の挿入. 払い出した PK を返す        |
 | BulkInsert     | 新規 Record の一括挿入. PK は出力先の Span に書く |
 | Update         | 既存 Record の部分更新                        |
+| UpdateRef      | キー以外のフィールドをその場で書き換えるための参照 (`readonly` でないフィールドを持つ場合のみ生成) |
 | Find           | PK での単一検索 (`TryFind` / `FindRef`)        |
 | FindByXxx      | Unique な SecondaryKey での単一検索            |
 | FindAllByXxx   | 非 Unique な SecondaryKey での検索              |
@@ -245,6 +252,7 @@ public sealed class SampleTable
     public ref readonly SampleRow FindRef(uint primaryKey, out bool found);
 
     public bool Update(uint primaryKey, Optional<string> name = default, Optional<string> description = default);
+    public ref SampleRow UpdateRef(uint primaryKey, out bool found); // readonly でないフィールドを持つ場合のみ
     public bool Remove(uint primaryKey);
 
     public AllEnumerable All();
@@ -257,6 +265,7 @@ public sealed class SampleTable
 ```
 
 - 列挙は struct で返す (`foreach (ref readonly var row in table.All())`).
+- `UpdateRef` は見つからない場合 `found = false` とし, 捨て場の Record (毎回 `default` に戻す) への参照を返す. 書き込んでもテーブルには影響しない.
 - 比較子は struct をジェネリクスで受けるか、生成コードに埋め込む (仮想呼び出しを避けるため).
 - 単一スレッド前提とする.
 
@@ -274,6 +283,7 @@ public sealed class SampleTable
 | Insert | **O(1) 償却** + 索引への挿入 × I | 配列の拡張時のみ O(n). 初期容量を指定すれば最悪 O(1) |
 | BulkInsert | **O(k) 償却** + 索引への一括挿入 × I | 配列の拡張は事前に 1 回 |
 | Update | **O(1)** + SecondaryKey が変わった索引ごとに削除 + 挿入 | SecondaryKey が変わらなければ O(1) |
+| UpdateRef | **O(1)** (最悪) | Find と同じ. 書き換え自体は利用者がその場で行う |
 | Remove | **O(1)** + 索引からの削除 × I | 末尾の Record を移すだけ |
 | All | **O(n)** | n は生存件数. 削除の履歴に依らない |
 | TrimExcess | O(n) + 索引の作り直し | |

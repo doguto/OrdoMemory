@@ -21,6 +21,7 @@ namespace OrdoMemory.Generator.Emitting
                                      public const int SlotBits = {{model.SlotBits}};
                                  
                                      static readonly {{rowType}} __notFound = default;
+                                     {{If(model.HasMutableField, $"static {rowType} __updateSink;")}}
                                  
                                      readonly {{storeType}} __store;
                                      {{Each(model.Keys, key => $"readonly {IndexType(model, key)} {key.IndexField};")}}
@@ -86,14 +87,15 @@ namespace OrdoMemory.Generator.Emitting
                                                                            }
                                                                            """));
 
-            // 主キーは Store で払い出されるまで決まらないため、払い出した後に主キーを差し込んだコピーを作る
+            // 主キーは Store で払い出されるまで決まらないため、払い出した後に主キーを差し込んだコピーを作る.
+            // Row が readonly struct でなくても隠れたコピーが起きないよう、生成するメンバーには readonly を付ける
             var rowInterface = $"global::OrdoMemory.IRow<{model.RowName}, {model.PrimaryKeyType}>";
             return Render($$"""
                             partial struct {{model.RowName}} : {{rowInterface}}
                             {
-                                {{model.PrimaryKeyType}} {{rowInterface}}.PrimaryKey => {{model.PrimaryKeyField}};
+                                readonly {{model.PrimaryKeyType}} {{rowInterface}}.PrimaryKey => {{model.PrimaryKeyField}};
 
-                                {{model.RowName}} {{rowInterface}}.WithPrimaryKey({{model.PrimaryKeyType}} primaryKey) => new {{model.RowName}}(primaryKey, in this);
+                                readonly {{model.RowName}} {{rowInterface}}.WithPrimaryKey({{model.PrimaryKeyType}} primaryKey) => new {{model.RowName}}(primaryKey, in this);
 
                                 {{publicConstructor}}
 
@@ -206,6 +208,19 @@ namespace OrdoMemory.Generator.Emitting
         {
             var rowType = model.RowFullName;
             var primaryKeyType = model.PrimaryKeyType;
+
+            // キー以外のフィールドをその場で書き換えるための参照. キーのフィールドは readonly を必須にしているため、
+            // この参照から索引と食い違う書き換えはできない. 見つからない場合は捨て場への参照を返す
+            var updateRef = If(model.HasMutableField, Render($$"""
+                                                              public ref {{rowType}} UpdateRef({{primaryKeyType}} primaryKey, out bool found)
+                                                              {
+                                                                  found = __store.TryGetIndex(primaryKey, out var index);
+                                                                  if (found) return ref __store.GetRowRef(index);
+                                                                  __updateSink = default;
+                                                                  return ref __updateSink;
+                                                              }
+                                                              """));
+
             return Render($$"""
                             public bool Contains({{primaryKeyType}} primaryKey) => __store.TryGetIndex(primaryKey, out _);
 
@@ -227,6 +242,8 @@ namespace OrdoMemory.Generator.Emitting
                                 if (found) return ref __store.GetRowRef(index);
                                 return ref __notFound;
                             }
+
+                            {{updateRef}}
                             """);
         }
 

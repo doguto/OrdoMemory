@@ -392,5 +392,76 @@ namespace OrdoMemory.Tests
             Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
             Assert.NotEqual(0, sum);
         }
+
+        [Fact]
+        public void UpdateRefWritesNonKeyFieldsInPlace()
+        {
+            var table = new CharacterTable();
+            Assert.True(table.TryInsert(new Character(10, 1, 100, "a"), out var first));
+            Assert.True(table.TryInsert(new Character(20, 1, 50, "b"), out var second));
+
+            ref var row = ref table.UpdateRef(first, out var found);
+            Assert.True(found);
+            row.Hp -= 30;
+            row.Note = "hit";
+
+            ref readonly var stored = ref table.FindRef(first, out _);
+            Assert.Equal(70, stored.Hp);
+            Assert.Equal("hit", stored.Note);
+            Assert.True(stored.IsAlive());
+            Assert.Equal(first, stored.Id);
+            Assert.Equal(10, stored.Code);
+
+            // 他の Record と索引は変わらない
+            Assert.Equal(50, table.FindRef(second, out _).Hp);
+            Assert.True(table.TryFindByCode(10, out var byCode));
+            Assert.Equal(70, byCode.Hp);
+            var team = 0;
+            foreach (ref readonly var _ in table.FindAllByTeam(1)) team++;
+            Assert.Equal(2, team);
+        }
+
+        [Fact]
+        public void UpdateRefNotFound()
+        {
+            var table = new CharacterTable();
+            Assert.True(table.TryInsert(new Character(10, 1, 100, "a"), out var primaryKey));
+            Assert.True(table.Remove(primaryKey));
+
+            ref var row = ref table.UpdateRef(primaryKey, out var found);
+            Assert.False(found);
+            Assert.Equal(0, row.Hp);
+            row.Hp = 999;
+
+            // 見つからない場合の参照への書き込みはどこにも残らない
+            Assert.Equal(0, table.UpdateRef(primaryKey, out _).Hp);
+            Assert.Equal(0, table.UpdateRef(CharacterTable.InvalidPrimaryKey, out _).Hp);
+            Assert.Equal(0, table.Count);
+        }
+
+        [Fact]
+        public void UpdateRefDuringEnumeration()
+        {
+            var table = new CharacterTable();
+            for (var i = 0; i < 10; i++) table.TryInsert(new Character(i, i % 2, i, null), out _);
+
+            // その場での書き換えは構造を変えないため、列挙中でも使える
+            foreach (ref readonly var row in table.All()) table.UpdateRef(row.Id, out _).Hp += 100;
+
+            foreach (ref readonly var row in table.All()) Assert.Equal(row.Code + 100, row.Hp);
+        }
+
+        [Fact]
+        public void UpdateStillChangesKeysOfMutableRow()
+        {
+            var table = new CharacterTable();
+            Assert.True(table.TryInsert(new Character(10, 1, 100, "a"), out var primaryKey));
+            Assert.True(table.Update(primaryKey, code: 11, hp: 5));
+
+            Assert.False(table.TryFindByCode(10, out _));
+            Assert.True(table.TryFindByCode(11, out var row));
+            Assert.Equal(5, row.Hp);
+            Assert.Equal("a", row.Note);
+        }
     }
 }
