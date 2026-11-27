@@ -73,4 +73,40 @@ namespace OrdoMemory.Tests
 
         public readonly bool IsAlive() => Hp > 0;
     }
+
+    // 利用者定義のコンストラクタが、生成されるコンストラクタと同じ型の並びで引数の順番だけ違う
+    [OrdoTable]
+    public readonly partial struct SwapRow
+    {
+        [PrimaryKey] public readonly uint Id;
+
+        [SecondaryKey(Unique = false)] public readonly int A;
+
+        public readonly int B;
+
+        public SwapRow(int b, int a)
+        {
+            Id = 0;
+            A = a;
+            B = b;
+        }
+    }
+
+    // SwapRow の readonly struct でない版. A (readonly の SecondaryKey) の変更は作り直し、B はその場で書き込む
+    [OrdoTable]
+    public partial struct MutableSwapRow
+    {
+        [PrimaryKey] public readonly uint Id;
+
+        [SecondaryKey(Unique = false)] public readonly int A;
+
+        public int B;
+
+        public MutableSwapRow(int b, int a)
+        {
+            Id = 0;
+            A = a;
+            B = b;
+        }
+    }
 }

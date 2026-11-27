@@ -171,6 +171,45 @@ namespace OrdoMemory.Tests
             Assert.Equal(1, CountKind(table, Kind.C));
         }
 
+        [Fact]
+        public void UpdateIgnoresUserConstructorParameterOrder()
+        {
+            var table = new SwapRowTable();
+            Assert.True(table.TryInsert(new SwapRow(b: 2, a: 1), out var primaryKey));
+
+            Assert.True(table.Update(primaryKey, a: 10));
+
+            Assert.True(table.TryFind(primaryKey, out var row));
+            Assert.Equal(primaryKey, row.Id);
+            Assert.Equal(10, row.A);
+            Assert.Equal(2, row.B);
+            Assert.False(table.TryFindFirstByA(1, out _));
+            Assert.True(table.TryFindFirstByA(10, out _));
+            Assert.False(table.TryFindFirstByA(2, out _));
+        }
+
+        [Fact]
+        public void UpdateOfMutableRowIgnoresUserConstructorParameterOrder()
+        {
+            var table = new MutableSwapRowTable();
+            Assert.True(table.TryInsert(new MutableSwapRow(b: 2, a: 1), out var primaryKey));
+
+            // readonly の A が変わるため Record 全体を作り直す
+            Assert.True(table.Update(primaryKey, a: 10));
+            Assert.True(table.TryFind(primaryKey, out var row));
+            Assert.Equal(primaryKey, row.Id);
+            Assert.Equal(10, row.A);
+            Assert.Equal(2, row.B);
+
+            // B はその場で書き込む
+            Assert.True(table.Update(primaryKey, b: 5));
+            Assert.True(table.TryFind(primaryKey, out row));
+            Assert.Equal(10, row.A);
+            Assert.Equal(5, row.B);
+            Assert.True(table.TryFindFirstByA(10, out _));
+            Assert.False(table.TryFindFirstByA(1, out _));
+        }
+
         static int CountKind(ItemTable table, Kind kind)
         {
             var n = 0;

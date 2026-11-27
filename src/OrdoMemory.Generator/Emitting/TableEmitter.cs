@@ -87,21 +87,24 @@ namespace OrdoMemory.Generator.Emitting
                                                                            """));
 
             // 主キーは Store で払い出されるまで決まらないため、払い出した後に主キーを差し込んだコピーを作る.
+            // Update もこのコンストラクタを使う. 利用者が同じ型の並びのコンストラクタを定義していても
+            // 引数の位置で呼び違えないよう、RowInitTag を取る専用のコンストラクタにする.
             // Row が readonly struct でなくても隠れたコピーが起きないよう、生成するメンバーには readonly を付ける
+            var thisArguments = string.Join(", ", model.Fields.Select(field => $"this.{field.Name}"));
             var rowInterface = $"global::OrdoMemory.IRow<{model.RowName}, {model.PrimaryKeyType}>";
             return Render($$"""
                             partial struct {{model.RowName}} : {{rowInterface}}
                             {
                                 readonly {{model.PrimaryKeyType}} {{rowInterface}}.PrimaryKey => {{model.PrimaryKeyField}};
 
-                                readonly {{model.RowName}} {{rowInterface}}.WithPrimaryKey({{model.PrimaryKeyType}} primaryKey) => new {{model.RowName}}(primaryKey, in this);
+                                readonly {{model.RowName}} {{rowInterface}}.WithPrimaryKey({{model.PrimaryKeyType}} primaryKey) => new {{model.RowName}}(default(global::OrdoMemory.RowInitTag), primaryKey, {{thisArguments}});
 
                                 {{publicConstructor}}
 
-                                internal {{model.RowName}}({{model.PrimaryKeyType}} primaryKey, in {{model.RowName}} source)
+                                internal {{model.RowName}}(global::OrdoMemory.RowInitTag __tag, {{model.PrimaryKeyType}} primaryKey, {{parameters}})
                                 {
                                     this.{{model.PrimaryKeyField}} = primaryKey;
-                                    {{Each(model.Fields, field => $"this.{field.Name} = source.{field.Name};")}}
+                                    {{Each(model.Fields, field => $"this.{field.Name} = {field.ParameterName};")}}
                                 }
                             }
                             """);
@@ -236,16 +239,17 @@ namespace OrdoMemory.Generator.Emitting
         static string EmitUpdate(TableModel model)
         {
             var parameters = string.Join(", ", model.Fields.Select(field => $"global::OrdoMemory.Optional<{field.Type}> {field.ParameterName} = default"));
-            var arguments = string.Join(", ", model.Fields.Select(field => $"{field.ParameterName}.OrElse(__current.{field.Name})"));
+            var arguments = string.Join(", ", model.Fields.Select(NextValue));
             var keyIndices = Enumerable.Range(0, model.Keys.Count).ToList();
             var uniqueKeyIndices = keyIndices.Where(keyIndex => model.Keys[keyIndex].Unique).ToList();
             var conflictCondition = string.Join(" || ", uniqueKeyIndices.Select(keyIndex => $"(__changed{keyIndex} && {model.Keys[keyIndex].IndexField}.ContainsKey(__newKey{keyIndex}))"));
             var anyChangedCondition = string.Join(" || ", keyIndices.Select(keyIndex => $"__changed{keyIndex}"));
 
+            // 新しい値をローカル変数に求めてから、RowInitTag を取る専用のコンストラクタで 1 回だけ作り直す
             var rebuild = Render($$"""
-                                   var __next = new {{model.RowFullName}}({{arguments}});
+                                   {{Each(model.Fields, field => $"var {NextValue(field)} = {field.ParameterName}.OrElse(__current.{field.Name});")}}
                                    {{Each(keyIndices, keyIndex => EmitApplyKeyChange(model, keyIndex))}}
-                                   __current = new {{model.RowFullName}}(primaryKey, in __next);
+                                   __current = new {{model.RowFullName}}(default(global::OrdoMemory.RowInitTag), primaryKey, {{arguments}});
                                    {{If(keyIndices.Count > 0, $"if ({anyChangedCondition}) __store.Touch();")}}
                                    return true;
                                    """);
@@ -287,6 +291,11 @@ namespace OrdoMemory.Generator.Emitting
                                 {{body}}
                             }
                             """);
+        }
+
+        static string NextValue(FieldModel field)
+        {
+            return "__next_" + field.Name;
         }
 
         static string EmitDetectKeyChange(TableModel model, int keyIndex)
