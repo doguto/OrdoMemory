@@ -104,10 +104,15 @@ namespace OrdoMemory
     {
         const int InitialPostingLength = 2;
 
+        // 空いた値の PK 配列は、この長さ以下なら次の値で使い回す. 長い配列を空き枠に残し続けないため
+        const int MaxPooledPostingLength = 16;
+
         readonly Dictionary<TKey, int> map = new(KeyComparer<TKey>.Default);
         int nullPosting = -1;
 
         TPrimaryKey[][] postings = new TPrimaryKey[4][];
+
+        // 使用中の枠は PK の件数. 空き枠は空きリストの次の枠を -2 - next で持つ (負の値で空き枠と分かる)
         int[] lengths = new int[4];
         int postingUsed;
         int postingFree = -1;
@@ -220,8 +225,15 @@ namespace OrdoMemory
             map.TrimExcess();
             for (var id = 0; id < postingUsed; id++)
             {
-                var list = postings[id];
-                if (list != null && list.Length != lengths[id]) Array.Resize(ref postings[id], lengths[id]);
+                var length = lengths[id];
+                if (length < 0)
+                {
+                    // 空き枠に残した配列は手放す
+                    postings[id] = null;
+                    continue;
+                }
+
+                if (postings[id].Length != length) Array.Resize(ref postings[id], length);
             }
         }
 
@@ -237,7 +249,7 @@ namespace OrdoMemory
             if (postingFree >= 0)
             {
                 id = postingFree;
-                postingFree = lengths[id];
+                postingFree = -2 - lengths[id];
             }
             else
             {
@@ -250,15 +262,17 @@ namespace OrdoMemory
                 id = postingUsed++;
             }
 
-            postings[id] = new TPrimaryKey[InitialPostingLength];
+            // 空き枠に配列が残っていれば使い回す
+            if (postings[id] == null) postings[id] = new TPrimaryKey[InitialPostingLength];
             lengths[id] = 0;
             return id;
         }
 
         void FreePosting(int id)
         {
-            postings[id] = null;
-            lengths[id] = postingFree;
+            // 短い配列は枠に残して次の AllocatePosting で使い回す. TPrimaryKey は unmanaged のため消去は不要
+            if (postings[id].Length > MaxPooledPostingLength) postings[id] = null;
+            lengths[id] = -2 - postingFree;
             postingFree = id;
         }
 

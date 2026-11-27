@@ -244,6 +244,68 @@ namespace OrdoMemory.Tests
         }
 
         [Fact]
+        public void HashMultiIndexReusesPostings()
+        {
+            var index = new HashMultiIndex<int, uint>();
+
+            // 値ごとの PK 配列を確保させてから全て消す
+            Churn(index, 0, 256);
+
+            // 新しい値の挿入・削除を繰り返しても PK 配列を確保しない
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            for (var round = 1; round <= 8; round++) Churn(index, round * 1000, 256);
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.Equal(0, allocated);
+            Assert.Equal(0, index.Count);
+
+            // 使い回した配列に古い PK が見えない
+            index.Insert(1, 10);
+            index.Insert(2, 20);
+            index.Insert(2, 21);
+            AssertPostings(index, 1, 10);
+            AssertPostings(index, 2, 20, 21);
+
+            // 長い配列を持つ値を消しても、他の値の挿入・TrimExcess が正しく動く
+            for (uint pk = 100; pk < 200; pk++) index.Insert(3, pk);
+            for (uint pk = 100; pk < 200; pk++) Assert.True(index.Remove(3, pk));
+            Assert.False(index.ContainsKey(3));
+            index.Insert(4, 40);
+            index.TrimExcess();
+            index.Insert(5, 50);
+            index.Insert(5, 51);
+            index.Insert(5, 52);
+            AssertPostings(index, 1, 10);
+            AssertPostings(index, 2, 20, 21);
+            AssertPostings(index, 4, 40);
+            AssertPostings(index, 5, 50, 51, 52);
+            Assert.Equal(7, index.Count);
+
+            static void Churn(HashMultiIndex<int, uint> index, int keyBase, int keyCount)
+            {
+                for (var i = 0; i < keyCount; i++)
+                {
+                    index.Insert(keyBase + i, (uint)i * 2);
+                    index.Insert(keyBase + i, (uint)i * 2 + 1);
+                }
+
+                for (var i = 0; i < keyCount; i++)
+                {
+                    Assert.True(index.Remove(keyBase + i, (uint)i * 2));
+                    Assert.True(index.Remove(keyBase + i, (uint)i * 2 + 1));
+                }
+            }
+
+            static void AssertPostings(HashMultiIndex<int, uint> index, int key, params uint[] expected)
+            {
+                var actual = new List<uint>();
+                var e = index.Equal(key);
+                while (e.MoveNext()) actual.Add(e.Current);
+                actual.Sort();
+                Assert.Equal(expected, actual);
+            }
+        }
+
+        [Fact]
         public void HashUniqueIndex()
         {
             var index = new HashUniqueIndex<string, uint>();
