@@ -127,11 +127,26 @@ return ref dense[s.dense];
 2. 払い出す PK を差し込んだ Record を `dense[count]` に書き込み、`slots[slot].dense = count` とする.
 3. PK = `(generation << SlotBits) | slot` を返す.
 
+#### 失敗理由
+
+Insert / BulkInsert は次の 2 つの理由で失敗する. 理由は `out InsertResult` を取るオーバーロードで受け取れる.
+
+| `InsertResult` | 意味 |
+|---|---|
+| `Success` | 成功 |
+| `Duplicate` | Unique な SecondaryKey が既存の Record と重複した (BulkInsert では同じ一括挿入内の Record 同士の重複も含む) |
+| `Full` | スロットを使い切った (同時に持てる件数の上限、または世代の使い切り) |
+
+- Insert は Unique 制約を先に確認するため、両方に該当する場合は `Duplicate` を返す.
+- BulkInsert は容量を先に確認するため、両方に該当する場合は `Full` を返す.
+- どちらの理由でも、テーブルの内容は変わらない.
+
 ### BulkInsert
 
 - 払い出す PK は連続しないため、PK を書き込む出力先 (Span) を引数で受け取る.
 - `dense` / `slots` を必要な件数分まとめて拡張してから書き込む.
-- 上限を超える場合は何も挿入せずに失敗する.
+- 上限を超える場合は何も挿入せずに失敗する (`InsertResult.Full`).
+- Unique 制約に違反した場合は、挿入した Record を巻き戻して失敗する (`InsertResult.Duplicate`).
 
 ### Update
 
@@ -239,7 +254,9 @@ public sealed class SampleTable
     public const uint InvalidPrimaryKey = 0;
 
     public bool TryInsert(in SampleRow row, out uint primaryKey);
+    public bool TryInsert(in SampleRow row, out uint primaryKey, out InsertResult result);
     public bool TryBulkInsert(ReadOnlySpan<SampleRow> rows, Span<uint> primaryKeys);
+    public bool TryBulkInsert(ReadOnlySpan<SampleRow> rows, Span<uint> primaryKeys, out InsertResult result);
 
     public bool TryFind(uint primaryKey, out SampleRow row);
     public ref readonly SampleRow FindRef(uint primaryKey, out bool found);

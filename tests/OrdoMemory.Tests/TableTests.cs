@@ -315,6 +315,71 @@ namespace OrdoMemory.Tests
         }
 
         [Fact]
+        public void InsertResultDistinguishesFailureReasons()
+        {
+            var table = new TinyRowTable();
+            Assert.True(table.TryInsert(new TinyRow(0), out var primaryKey, out var result));
+            Assert.Equal(InsertResult.Success, result);
+            Assert.NotEqual(TinyRowTable.InvalidPrimaryKey, primaryKey);
+
+            Assert.False(table.TryInsert(new TinyRow(0), out primaryKey, out result));
+            Assert.Equal(InsertResult.Duplicate, result);
+            Assert.Equal(TinyRowTable.InvalidPrimaryKey, primaryKey);
+
+            for (var i = 1; i < 4; i++)
+            {
+                Assert.True(table.TryInsert(new TinyRow(i), out _, out result));
+                Assert.Equal(InsertResult.Success, result);
+            }
+
+            Assert.False(table.TryInsert(new TinyRow(9), out primaryKey, out result));
+            Assert.Equal(InsertResult.Full, result);
+            Assert.Equal(TinyRowTable.InvalidPrimaryKey, primaryKey);
+
+            // 重複と容量枯渇が同時に起きる場合は Duplicate を返す
+            Assert.False(table.TryInsert(new TinyRow(0), out _, out result));
+            Assert.Equal(InsertResult.Duplicate, result);
+            Assert.Equal(4, table.Count);
+        }
+
+        [Fact]
+        public void BulkInsertResultDistinguishesFailureReasons()
+        {
+            var table = new TinyRowTable();
+            var primaryKeys = new uint[4];
+            Assert.True(table.TryBulkInsert(Array.Empty<TinyRow>(), primaryKeys, out var result));
+            Assert.Equal(InsertResult.Success, result);
+
+            Assert.True(table.TryBulkInsert(new[] { new TinyRow(0), new TinyRow(1) }, primaryKeys, out result));
+            Assert.Equal(InsertResult.Success, result);
+
+            Assert.False(table.TryBulkInsert(new[] { new TinyRow(2), new TinyRow(0) }, primaryKeys, out result));
+            Assert.Equal(InsertResult.Duplicate, result);
+
+            Assert.False(table.TryBulkInsert(new[] { new TinyRow(2), new TinyRow(2) }, primaryKeys, out result));
+            Assert.Equal(InsertResult.Duplicate, result);
+            Assert.Equal(2, table.Count);
+
+            Assert.False(table.TryBulkInsert(new[] { new TinyRow(2), new TinyRow(3), new TinyRow(4) }, primaryKeys, out result));
+            Assert.Equal(InsertResult.Full, result);
+            Assert.Equal(2, table.Count);
+
+            Assert.True(table.TryBulkInsert(new[] { new TinyRow(2), new TinyRow(3) }, primaryKeys, out result));
+            Assert.Equal(InsertResult.Success, result);
+            Assert.Equal(4, table.Count);
+        }
+
+        [Fact]
+        public void InsertResultWithoutUniqueKeys()
+        {
+            var table = new OneGenRowTable();
+            Assert.True(table.TryInsert(new OneGenRow(1), out _, out var result));
+            Assert.Equal(InsertResult.Success, result);
+            Assert.True(table.TryInsert(new OneGenRow(1), out _, out result));
+            Assert.Equal(InsertResult.Success, result);
+        }
+
+        [Fact]
         public void UInt64PrimaryKey()
         {
             var table = new BigTable();
