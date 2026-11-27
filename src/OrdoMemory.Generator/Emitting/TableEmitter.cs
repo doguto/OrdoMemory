@@ -13,7 +13,7 @@ namespace OrdoMemory.Generator.Emitting
             var storeType = $"global::OrdoMemory.RowStore<{rowType}, {primaryKeyType}, {model.PrimaryKeyTraits}>";
 
             var table = Render($$"""
-                                 {{EmitRowConstructors(model)}}
+                                 {{EmitRowMembers(model)}}
 
                                  {{model.Accessibility}} sealed partial class {{model.TableName}}
                                  {
@@ -75,7 +75,7 @@ namespace OrdoMemory.Generator.Emitting
                             """) + "\n";
         }
 
-        static string EmitRowConstructors(TableModel model)
+        static string EmitRowMembers(TableModel model)
         {
             var parameters = string.Join(", ", model.Fields.Select(field => $"{field.Type} {field.ParameterName}"));
             var publicConstructor = If(model.GenerateConstructor, Render($$"""
@@ -87,9 +87,14 @@ namespace OrdoMemory.Generator.Emitting
                                                                            """));
 
             // 主キーは Store で払い出されるまで決まらないため、払い出した後に主キーを差し込んだコピーを作る
+            var rowInterface = $"global::OrdoMemory.IRow<{model.RowName}, {model.PrimaryKeyType}>";
             return Render($$"""
-                            partial struct {{model.RowName}}
+                            partial struct {{model.RowName}} : {{rowInterface}}
                             {
+                                {{model.PrimaryKeyType}} {{rowInterface}}.PrimaryKey => {{model.PrimaryKeyField}};
+
+                                {{model.RowName}} {{rowInterface}}.WithPrimaryKey({{model.PrimaryKeyType}} primaryKey) => new {{model.RowName}}(primaryKey, in this);
+
                                 {{publicConstructor}}
 
                                 internal {{model.RowName}}({{model.PrimaryKeyType}} primaryKey, in {{model.RowName}} source)
@@ -118,7 +123,6 @@ namespace OrdoMemory.Generator.Emitting
                                 }
                             
                                 primaryKey = __store.Store(in row);
-                                __store.GetRowRef(__store.GetIndex(primaryKey)) = new {{model.RowFullName}}(primaryKey, in row);
                                 {{Each(model.Keys, key => $"{key.IndexField}.Insert({ConvertKey(key, "row." + key.Field.Name)}, primaryKey);")}}
                                 return true;
                             }
@@ -148,9 +152,7 @@ namespace OrdoMemory.Generator.Emitting
                             
                                 for (var i = 0; i < rowCount; i++)
                                 {
-                                    var primaryKey = __store.Store(in rows[i]);
-                                    __store.GetRowRef(__store.GetIndex(primaryKey)) = new {{rowType}}(primaryKey, in rows[i]);
-                                    primaryKeys[i] = primaryKey;
+                                    primaryKeys[i] = __store.Store(in rows[i]);
                                 }
 
                                 global::System.ReadOnlySpan<{{primaryKeyType}}> stored = primaryKeys.Slice(0, rowCount);

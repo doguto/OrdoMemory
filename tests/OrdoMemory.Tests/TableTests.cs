@@ -119,8 +119,11 @@ namespace OrdoMemory.Tests
         static List<(uint, int)> Enumerate(ItemTable table)
         {
             var list = new List<(uint, int)>();
-            var e = table.All().GetEnumerator();
-            while (e.MoveNext()) list.Add((e.CurrentPrimaryKey, e.Current.Code));
+            foreach (ref readonly var r in table.All())
+            {
+                list.Add((r.Id, r.Code));
+            }
+
             return list;
         }
 
@@ -321,12 +324,11 @@ namespace OrdoMemory.Tests
             Assert.Equal(1UL << 32, a & ~0xFFFFFFFFUL);
 
             var primaryKeys = new List<ulong>();
-            foreach (ref readonly var _ in table.FindAllByValue(5))
+            foreach (ref readonly var r in table.FindAllByValue(5))
             {
+                primaryKeys.Add(r.Id);
             }
 
-            var e = table.FindAllByValue(5).GetEnumerator();
-            while (e.MoveNext()) primaryKeys.Add(e.CurrentPrimaryKey);
             Assert.Equal(new[] { a, b }.OrderBy(x => x), primaryKeys);
 
             Assert.True(table.Update(a, primaryKeyValue: 10));

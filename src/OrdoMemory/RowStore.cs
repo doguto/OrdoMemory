@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 namespace OrdoMemory
 {
     public sealed partial class RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits>
-        where TRow : struct
+        where TRow : struct, IRow<TRow, TPrimaryKey>
         where TPrimaryKey : unmanaged
         where TPrimaryKeyTraits : struct, IPrimaryKeyTraits<TPrimaryKey>
     {
@@ -25,7 +25,6 @@ namespace OrdoMemory
 
         // 実データ
         TRow[] dense;
-        int[] denseIndexToSlotIndex;
         int denseCount;
 
         // 主キーの Slot 部から dense 配列上の位置を求める中間配列
@@ -55,7 +54,6 @@ namespace OrdoMemory
 
             if (capacity < 0 || capacity > maxSlots) throw new ArgumentOutOfRangeException(nameof(capacity));
             dense = new TRow[capacity];
-            denseIndexToSlotIndex = new int[capacity];
             slots = new Slot[capacity];
         }
 
@@ -100,12 +98,6 @@ namespace OrdoMemory
             return slots[(int)(default(TPrimaryKeyTraits).ToUInt64(primaryKey) & slotMask)].dense;
         }
 
-        public TPrimaryKey GetPrimaryKey(int denseIndex)
-        {
-            var slot = denseIndexToSlotIndex[denseIndex];
-            return MakePrimaryKey(slots[slot].generation, slot);
-        }
-
         // Insert 前に挿入する個数分の空き容量があることを確認する
         public bool TryReserve(int required)
         {
@@ -116,7 +108,6 @@ namespace OrdoMemory
             if ((long)slotCount + newSlotCount > maxSlots) return false;
 
             EnsureCapacity(ref dense, denseCount + required);
-            EnsureCapacity(ref denseIndexToSlotIndex, denseCount + required);
             EnsureCapacity(ref slots, slotCount + newSlotCount);
             return true;
         }
@@ -135,24 +126,23 @@ namespace OrdoMemory
                 slots[slot].generation = 1;
             }
 
-            dense[denseCount] = row;
-            denseIndexToSlotIndex[denseCount] = slot;
+            var primaryKey = MakePrimaryKey(slots[slot].generation, slot);
+            dense[denseCount] = row.WithPrimaryKey(primaryKey);
             slots[slot].dense = denseCount;
             denseCount++;
             version++;
-            return MakePrimaryKey(slots[slot].generation, slot);
+            return primaryKey;
         }
 
         public void Remove(int denseIndex)
         {
-            var slotIndex = denseIndexToSlotIndex[denseIndex];
+            var slotIndex = SlotIndexOf(denseIndex);
             var last = denseCount - 1;
             if (denseIndex != last)
             {
                 // dense 配列を常に密にするため、末尾要素を削除により空いた箇所にコピーする
                 dense[denseIndex] = dense[last];
-                denseIndexToSlotIndex[denseIndex] = denseIndexToSlotIndex[last];
-                slots[denseIndexToSlotIndex[denseIndex]].dense = denseIndex;
+                slots[SlotIndexOf(denseIndex)].dense = denseIndex;
             }
 
             dense[last] = default;
@@ -185,9 +175,14 @@ namespace OrdoMemory
         public void TrimExcess()
         {
             Array.Resize(ref dense, denseCount);
-            Array.Resize(ref denseIndexToSlotIndex, denseCount);
             Array.Resize(ref slots, slotCount);
             version++;
+        }
+
+        // Record が持つ主キーの slot 部から、Record を指している slot を求める
+        int SlotIndexOf(int denseIndex)
+        {
+            return (int)(default(TPrimaryKeyTraits).ToUInt64(dense[denseIndex].PrimaryKey) & slotMask);
         }
 
         TPrimaryKey MakePrimaryKey(uint generation, int slot)

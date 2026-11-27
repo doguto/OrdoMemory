@@ -32,9 +32,6 @@ ECS (EnTT, Unity Entities 等) で使われている「世代付きハンドル 
 // 生存している Record だけを隙間無く並べる. All はこれを先頭から読むだけ.
 Row[] dense;
 
-// dense[i] を指しているスロット. Remove で末尾を移すときに使う.
-int[] denseToSlot;
-
 // 生存件数. 次の書き込み先の添字でもある.
 int count;
 
@@ -55,6 +52,8 @@ int freeHead;
 
 - `Slot` は 1 つの struct にまとめ、Find で触るキャッシュラインを 1 本にする.
 - Record (Row) は自身の PK を持つ. 検索や列挙で得た Record から、他のテーブルや外部のオブジェクトが参照するための PK を直接取り出せるようにするため.
+- dense[i] を指しているスロットは、Record が持つ PK の下位ビット (スロット番号) から求める. そのため dense → スロットの逆引き表は持たない.
+  - dense 上の Record の PK は常に正しくなければならない. Record を書き換えるのは Update のみとし、Update は PK を保持する.
 
 ### Record
 
@@ -125,13 +124,13 @@ return ref dense[s.dense];
 
 1. 空きリストの先頭からスロットを取る. 無ければ `slotCount` 番目を新しく使い、`generation = 1` とする.
    - 直前に空いたスロットから使うため、キャッシュに乗っていることが多い.
-2. `dense[count]` に書き込み、`denseToSlot[count] = slot`、`slots[slot].dense = count` とする.
+2. 払い出す PK を差し込んだ Record を `dense[count]` に書き込み、`slots[slot].dense = count` とする.
 3. PK = `(generation << SlotBits) | slot` を返す.
 
 ### BulkInsert
 
 - 払い出す PK は連続しないため、PK を書き込む出力先 (Span) を引数で受け取る.
-- `dense` / `denseToSlot` / `slots` を必要な件数分まとめて拡張してから書き込む.
+- `dense` / `slots` を必要な件数分まとめて拡張してから書き込む.
 - 上限を超える場合は何も挿入せずに失敗する.
 
 ### Update
@@ -302,9 +301,8 @@ public sealed class SampleTable
 | 項目 | 1 件あたり |
 |---|---|
 | Row | Record の大きさ (SampleRow なら 16B, ベンチマークの Row なら 32B). PK のフィールド (4B / 8B) を含む |
-| `denseToSlot` | 4B |
 | `slots` | 8B |
-| **合計** | **Row + 12B** + 配列の余り |
+| **合計** | **Row + 8B** + 配列の余り |
 
 二次索引は 1 件あたり、Ordered (int キー) で約 18B (ベンチマークの値).
 

@@ -57,8 +57,6 @@ namespace OrdoMemory
 
             public ref readonly TRow Current => ref store.dense[index];
 
-            public TPrimaryKey CurrentPrimaryKey => store.GetPrimaryKey(index);
-
             public bool MoveNext()
             {
                 store.CheckVersion(version);
@@ -101,8 +99,6 @@ namespace OrdoMemory
             }
 
             public ref readonly TRow Current => ref store.dense[index];
-
-            public TPrimaryKey CurrentPrimaryKey => primaryKeys.Current;
 
             public bool MoveNext()
             {
