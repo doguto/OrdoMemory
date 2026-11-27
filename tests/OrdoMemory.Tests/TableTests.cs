@@ -171,6 +171,45 @@ namespace OrdoMemory.Tests
             Assert.Equal(1, CountKind(table, Kind.C));
         }
 
+        [Fact]
+        public void UpdateIgnoresUserConstructorParameterOrder()
+        {
+            var table = new SwapRowTable();
+            Assert.True(table.TryInsert(new SwapRow(b: 2, a: 1), out var primaryKey));
+
+            Assert.True(table.Update(primaryKey, a: 10));
+
+            Assert.True(table.TryFind(primaryKey, out var row));
+            Assert.Equal(primaryKey, row.Id);
+            Assert.Equal(10, row.A);
+            Assert.Equal(2, row.B);
+            Assert.False(table.TryFindFirstByA(1, out _));
+            Assert.True(table.TryFindFirstByA(10, out _));
+            Assert.False(table.TryFindFirstByA(2, out _));
+        }
+
+        [Fact]
+        public void UpdateOfMutableRowIgnoresUserConstructorParameterOrder()
+        {
+            var table = new MutableSwapRowTable();
+            Assert.True(table.TryInsert(new MutableSwapRow(b: 2, a: 1), out var primaryKey));
+
+            // readonly の A が変わるため Record 全体を作り直す
+            Assert.True(table.Update(primaryKey, a: 10));
+            Assert.True(table.TryFind(primaryKey, out var row));
+            Assert.Equal(primaryKey, row.Id);
+            Assert.Equal(10, row.A);
+            Assert.Equal(2, row.B);
+
+            // B はその場で書き込む
+            Assert.True(table.Update(primaryKey, b: 5));
+            Assert.True(table.TryFind(primaryKey, out row));
+            Assert.Equal(10, row.A);
+            Assert.Equal(5, row.B);
+            Assert.True(table.TryFindFirstByA(10, out _));
+            Assert.False(table.TryFindFirstByA(1, out _));
+        }
+
         static int CountKind(ItemTable table, Kind kind)
         {
             var n = 0;
@@ -391,6 +430,110 @@ namespace OrdoMemory.Tests
             Run();
             Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
             Assert.NotEqual(0, sum);
+        }
+
+        [Fact]
+        public void UpdateWritesMutableFieldsInPlace()
+        {
+            var table = new CharacterTable();
+            Assert.True(table.TryInsert(new Character(10, 1, "g", 100, "a"), out var first));
+            Assert.True(table.TryInsert(new Character(20, 1, "g", 50, "b"), out var second));
+
+            Assert.True(table.Update(first, hp: 70));
+            ref readonly var row = ref table.FindRef(first, out _);
+            Assert.Equal(70, row.Hp);
+            Assert.Equal("a", row.Note);
+            Assert.Equal(first, row.Id);
+            Assert.Equal(10, row.Code);
+
+            // 値が同じキーを指定しても、索引は付け替えない
+            Assert.True(table.Update(first, code: 10, team: 1, note: "hit"));
+            row = ref table.FindRef(first, out _);
+            Assert.Equal(70, row.Hp);
+            Assert.Equal("hit", row.Note);
+
+            Assert.Equal(50, table.FindRef(second, out _).Hp);
+            Assert.True(table.TryFindByCode(10, out var byCode));
+            Assert.Equal("hit", byCode.Note);
+            Assert.Equal(2, CountTeam(table, 1));
+        }
+
+        [Fact]
+        public void UpdateChangesKeysAndMutableFieldsTogether()
+        {
+            var table = new CharacterTable();
+            Assert.True(table.TryInsert(new Character(10, 1, "g", 100, "a"), out var primaryKey));
+            Assert.True(table.TryInsert(new Character(20, 2, "g", 100, "b"), out _));
+
+            Assert.True(table.Update(primaryKey, code: 11, team: 2, hp: 5));
+            Assert.False(table.TryFindByCode(10, out _));
+            Assert.True(table.TryFindByCode(11, out var row));
+            Assert.Equal(primaryKey, row.Id);
+            Assert.Equal(5, row.Hp);
+            Assert.Equal("a", row.Note);
+            Assert.Equal(0, CountTeam(table, 1));
+            Assert.Equal(2, CountTeam(table, 2));
+
+            // Unique 制約に違反する場合は、他のフィールドも書き換えない
+            Assert.False(table.Update(primaryKey, code: 20, hp: 999));
+            Assert.Equal(5, table.FindRef(primaryKey, out _).Hp);
+        }
+
+        [Fact]
+        public void UpdateMutableSecondaryKeyInPlace()
+        {
+            var table = new CharacterTable();
+            Assert.True(table.TryInsert(new Character(10, 1, "g", 100, "a"), out var primaryKey));
+            Assert.True(table.TryInsert(new Character(20, 1, "g", 100, "b"), out _));
+
+            // readonly でない SecondaryKey (FK) の変更は、索引を付け替えてその場で書き込む
+            Assert.True(table.Update(primaryKey, team: 2, group: "h", hp: 1));
+            ref readonly var row = ref table.FindRef(primaryKey, out _);
+            Assert.Equal(2, row.Team);
+            Assert.Equal("h", row.Group);
+            Assert.Equal(1, row.Hp);
+            Assert.Equal(10, row.Code);
+            Assert.Equal(1, CountTeam(table, 1));
+            Assert.Equal(1, CountTeam(table, 2));
+            Assert.True(table.TryFindFirstByGroup("h", out var byGroup));
+            Assert.Equal(primaryKey, byGroup.Id);
+            Assert.True(table.TryFindFirstByGroup("g", out var other));
+            Assert.NotEqual(primaryKey, other.Id);
+
+            // 索引の構造が変わるため、列挙中の FK の変更は例外になる
+            Assert.Throws<InvalidOperationException>(() =>
+            {
+                foreach (ref readonly var _ in table.All()) table.Update(primaryKey, team: 3);
+            });
+        }
+
+        [Fact]
+        public void UpdateMutableFieldsDuringEnumeration()
+        {
+            var table = new CharacterTable();
+            for (var i = 0; i < 10; i++) table.TryInsert(new Character(i, i % 2, "g", i, null), out _);
+
+            // キーが変わらない Update は構造を変えないため、列挙中でも行える
+            foreach (ref readonly var row in table.All()) table.Update(row.Id, hp: row.Hp + 100);
+
+            foreach (ref readonly var row in table.All()) Assert.Equal(row.Code + 100, row.Hp);
+        }
+
+        [Fact]
+        public void UpdateMissingPrimaryKey()
+        {
+            var table = new CharacterTable();
+            Assert.True(table.TryInsert(new Character(10, 1, "g", 100, "a"), out var primaryKey));
+            Assert.True(table.Remove(primaryKey));
+            Assert.False(table.Update(primaryKey, hp: 1));
+            Assert.False(table.Update(CharacterTable.InvalidPrimaryKey, hp: 1));
+        }
+
+        static int CountTeam(CharacterTable table, int team)
+        {
+            var n = 0;
+            foreach (ref readonly var _ in table.FindAllByTeam(team)) n++;
+            return n;
         }
 
         [Fact]

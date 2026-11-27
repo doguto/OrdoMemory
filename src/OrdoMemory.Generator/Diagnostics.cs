@@ -6,9 +6,9 @@ namespace OrdoMemory.Generator
     {
         const string Category = "OrdoMemory";
 
-        public static readonly DiagnosticDescriptor MustBeReadOnlyPartial = new(
-            "OM001", "OrdoTable must be a readonly partial struct",
-            "'{0}' must be declared as 'readonly partial struct'",
+        public static readonly DiagnosticDescriptor MustBePartial = new(
+            "OM001", "OrdoTable must be a partial struct",
+            "'{0}' must be declared as 'partial struct'",
             Category, DiagnosticSeverity.Error, true);
 
         public static readonly DiagnosticDescriptor UnsupportedDeclaration = new(
@@ -28,7 +28,7 @@ namespace OrdoMemory.Generator
 
         public static readonly DiagnosticDescriptor AutoPropertyNotSupported = new(
             "OM005", "Auto-property is not supported",
-            "'{0}' is an auto-property. Use a readonly field instead.",
+            "'{0}' is an auto-property. Use a field instead.",
             Category, DiagnosticSeverity.Error, true);
 
         public static readonly DiagnosticDescriptor InaccessibleField = new(
@@ -55,5 +55,15 @@ namespace OrdoMemory.Generator
             "OM010", "PrimaryKey cannot be a SecondaryKey",
             "PrimaryKey '{0}' cannot also be marked with [SecondaryKey]",
             Category, DiagnosticSeverity.Error, true);
+
+        public static readonly DiagnosticDescriptor PrimaryKeyMustBeReadOnly = new(
+            "OM011", "PrimaryKey must be readonly",
+            "PrimaryKey '{0}' must be readonly",
+            Category, DiagnosticSeverity.Error, true);
+
+        public static readonly DiagnosticDescriptor MemberShouldBeReadOnly = new(
+            "OM012", "Member of non-readonly OrdoTable should be readonly",
+            "'{0}.{1}' should be marked 'readonly' to avoid defensive copies through 'ref readonly' / 'in'",
+            Category, DiagnosticSeverity.Warning, true);
     }
 }

@@ -60,12 +60,21 @@ int freeHead;
 - スキーマから struct を生成し、テーブルが唯一の実体を持つ.
   - Record ごとのオブジェクトヘッダと参照が無くなり、GC が管理するオブジェクトも配列数本だけになる.
   - 値で受け取るため、同じインスタンスを二重に Insert するという問題が起こり得ない.
-- メンバには `readonly` を付ける. `ref readonly` / `in` で受け取ったときの隠れたコピー (defensive copy) を防ぐため.
-- 書き換えは Update 経由のみとする. 索引との食い違いを防ぐため.
+- `partial struct` とする. `readonly struct` でもよい.
+- PK のフィールドには `readonly` を必須とする (OM011). PK は Record とスロットを結び付けるため, Update でも書き換えない.
+- PK 以外のフィールド (SecondaryKey を含む) は `readonly` を外してよい. 外したフィールドは Update がその場で書き換える.
+  - Record 全体を作り直して上書きすると, 大きな Record の一部だけを頻繁に書き換える場合に遅いため (64 フィールド・約 260B の Record で 1 フィールドの更新が約 95ns に対し, その場で書き換えると約 43ns).
+  - SecondaryKey (FK など) が変わる場合は, 索引を付け替えた後にそのフィールドだけを書き込む.
+  - `readonly` のフィールドを変える場合だけ, 従来どおり Record 全体を作り直す. 値が同じキーを指定しても変更なしとして扱う.
+  - テーブルは Record を `ref readonly` かコピーでしか返さないため, `readonly` を外してもテーブル内の Record を書き換えられるのは Update のみで, 索引と食い違うことはない.
+- `readonly struct` でない場合, 利用者が定義するメソッド・プロパティには `readonly` 修飾子を付ける (付けなければ OM012 の警告). `ref readonly` / `in` で受け取ったときの隠れたコピー (defensive copy) を防ぐため. フィールドの読み取りではコピーは起きない.
+  - 生成するメンバー (`IRow` の実装) には `readonly` を付ける.
 - `[PrimaryKey]` を付けたフィールドを必ず 1 つ持つ. 型は PK の型 (`uint` / `ulong`) と一致させる.
   - フィールドは利用者が宣言する. 生成コードで追加すると partial struct のフィールドが複数の宣言に分かれ、並び順が定義されなくなるため (CS0282).
   - PK は Insert で払い出されるまで決まらない. 生成するコンストラクタは PK を引数に取らず、Insert / BulkInsert で払い出した PK を差し込んだコピーを格納する. Insert 時に渡された値は無視する.
   - Update の引数に PK は含めない.
+- PK を差し込んだコピーの作成と、Update で Record 全体を作り直す場合は、`RowInitTag` を先頭に取る internal な専用コンストラクタで全フィールドを直接代入して行う.
+  - 利用者が同じ型の並びで引数の順番が違うコンストラクタ (例: `(int b, int a)`) を定義していても、引数の位置で呼び違えてフィールドが入れ替わることがない.
 - 生成時にフィールドをサイズの降順に並べ、パディングを減らす.
 
 ---
@@ -160,6 +169,7 @@ return ref dense[s.dense];
   - Remove: 末尾の Record が移動するため.
   - Insert / BulkInsert: 配列の拡張で再確保されるため.
 - 列挙中の Insert / Remove は `version` で検出し、例外とする.
+  - SecondaryKey が変わらない Update は構造を変えないため, 列挙中でも行える.
 
 ---
 
