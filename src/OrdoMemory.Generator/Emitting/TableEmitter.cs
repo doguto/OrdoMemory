@@ -35,6 +35,12 @@ namespace OrdoMemory.Generator.Emitting
                                  
                                      public int Capacity => __store.Capacity;
                                  
+                                     public int AvailableSlotCount => __store.AvailableSlotCount;
+                                 
+                                     public int RetiredSlotCount => __store.RetiredSlotCount;
+                                 
+                                     public ulong RemainingInsertCount => __store.RemainingInsertCount;
+                                 
                                      {{EmitInsert(model)}}
                                  
                                      {{EmitBulkInsert(model)}}

@@ -51,4 +51,12 @@ namespace OrdoMemory.Tests
 
         [SecondaryKey] public readonly int Value;
     }
+
+    [OrdoTable(SlotBits = 30)]
+    public readonly partial struct ShortGenRow
+    {
+        [PrimaryKey] public readonly uint Id;
+
+        public readonly int Value;
+    }
 }

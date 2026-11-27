@@ -39,6 +39,9 @@ namespace OrdoMemory
         // Generation を最大まで使い切り使用不可となった slot 数
         int retiredSlotCount;
 
+        // これまでに Store で払い出した PK の数. 生涯で払い出せる PK の残数の計算に使う
+        ulong storedCount;
+
         // 変更検知用の値. 変更をかける度に Increment
         int version;
 
@@ -62,6 +65,18 @@ namespace OrdoMemory
         public int Capacity => dense.Length;
 
         public int Version => version;
+
+        // 削除を挟まずに、今から続けて Insert できる件数
+        // 未使用の slot と空きリスト上の slot の合計. 世代を使い切った slot は含まない
+        public int AvailableSlotCount => maxSlots - denseCount - retiredSlotCount;
+
+        // 世代を使い切り、使用を止めた slot の数
+        public int RetiredSlotCount => retiredSlotCount;
+
+        // 生存中の Record を削除して slot を再利用する場合も含め、今後払い出せる PK の残数 (生涯の Insert 回数の残り)
+        // 各 slot は世代 1..maxGeneration の maxGeneration 回だけ使えるため、maxSlots * maxGeneration から払い出した数を引いた値になる
+        // 0 になると、テーブルが空でも Insert は失敗する
+        public ulong RemainingInsertCount => (ulong)maxSlots * maxGeneration - storedCount;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool TryGetIndex(TPrimaryKey primaryKey, out int index)
@@ -130,6 +145,7 @@ namespace OrdoMemory
             dense[denseCount] = row.WithPrimaryKey(primaryKey);
             slots[slot].dense = denseCount;
             denseCount++;
+            storedCount++;
             version++;
             return primaryKey;
         }
