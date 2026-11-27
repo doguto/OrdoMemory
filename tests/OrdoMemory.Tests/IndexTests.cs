@@ -256,5 +256,66 @@ namespace OrdoMemory.Tests
             Assert.True(index.Remove("x", 3));
             Assert.Equal(1, index.Count);
         }
+
+        [Fact]
+        public void HashIndexCountAndClear()
+        {
+            var multi = new HashMultiIndex<string, uint>();
+            multi.Insert("a", 1);
+            multi.Insert("a", 2);
+            multi.Insert(null, 3);
+            Assert.Equal(2, multi.CountOf("a"));
+            Assert.Equal(1, multi.CountOf(null));
+            Assert.Equal(0, multi.CountOf("b"));
+            multi.Clear();
+            Assert.Equal(0, multi.Count);
+            Assert.Equal(0, multi.CountOf("a"));
+            Assert.False(multi.ContainsKey(null));
+            multi.Insert("a", 4);
+            multi.Insert("b", 5);
+            Assert.Equal(1, multi.CountOf("a"));
+            Assert.True(multi.TryGetFirst("a", out var primaryKey));
+            Assert.Equal(4u, primaryKey);
+            Assert.Equal(2, multi.Count);
+
+            var unique = new HashUniqueIndex<string, uint>();
+            unique.Insert("x", 1);
+            unique.Insert(null, 2);
+            Assert.Equal(1, unique.CountOf("x"));
+            Assert.Equal(1, unique.CountOf(null));
+            unique.Clear();
+            Assert.Equal(0, unique.Count);
+            Assert.Equal(0, unique.CountOf(null));
+            Assert.True(unique.Insert(null, 3));
+            Assert.True(unique.Insert("x", 4));
+        }
+
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public void OrderedIndexCountAndClear(bool unique)
+        {
+            var index = new OrderedIndex<string, StringKey, uint, UInt32PrimaryKey>(unique, 4);
+            for (var round = 0; round < 3; round++)
+            {
+                var model = new Model<string>(StringComparer.Ordinal);
+                for (uint i = 1; i <= 200; i++)
+                {
+                    var key = unique ? "k" + i : "k" + i % 7;
+                    Assert.True(index.Insert(key, i));
+                    model.Add(key, i);
+                }
+
+                Assert.Equal(200, index.Count);
+                Assert.Equal(model.Range("k3", "k3").Count(), index.CountOf("k3"));
+                Assert.Equal(0, index.CountOf("zz"));
+                Assert.Equal(model.Range("k1", "k5").ToList(), Collect(index.Range("k1", "k5")));
+
+                index.Clear();
+                Assert.Equal(0, index.Count);
+                Assert.Equal(0, index.CountOf("k3"));
+                Assert.Empty(Collect(index.Range("", "zzz")));
+            }
+        }
     }
 }

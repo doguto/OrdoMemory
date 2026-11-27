@@ -366,6 +366,195 @@ namespace OrdoMemory.Tests
         }
 
         [Fact]
+        public void ClearInvalidatesOldPrimaryKeys()
+        {
+            var table = new ItemTable();
+            var old = new uint[5];
+            for (var i = 0; i < old.Length; i++)
+            {
+                Assert.True(table.TryInsert(NewItem(i, "n", Kind.B, score: i), out old[i]));
+            }
+
+            Assert.True(table.Remove(old[2]));
+            table.Clear();
+
+            Assert.Equal(0, table.Count);
+            Assert.Empty(Enumerate(table));
+            foreach (var primaryKey in old)
+            {
+                Assert.False(table.Contains(primaryKey));
+                Assert.False(table.TryFind(primaryKey, out _));
+                table.FindRef(primaryKey, out var found);
+                Assert.False(found);
+                Assert.False(table.Remove(primaryKey));
+                Assert.False(table.Update(primaryKey, code: 100));
+            }
+
+            Assert.False(table.TryFindByCode(1, out _));
+            Assert.False(table.TryFindByTag("tag1", out _));
+            Assert.Equal(0, table.CountByName("n"));
+            Assert.Equal(0, table.CountByKind(Kind.B));
+            Assert.Empty(table.FindRangeByScore(0, 10));
+
+            // 削除済みの一意キーも再挿入できる
+            var fresh = new uint[8];
+            for (var i = 0; i < fresh.Length; i++)
+            {
+                Assert.True(table.TryInsert(NewItem(i, "m", Kind.C, score: i), out fresh[i]));
+                Assert.DoesNotContain(fresh[i], old);
+            }
+
+            Assert.Equal(8, table.Count);
+            foreach (var primaryKey in old) Assert.False(table.Contains(primaryKey));
+            for (var i = 0; i < fresh.Length; i++)
+            {
+                Assert.True(table.TryFind(fresh[i], out var row));
+                Assert.Equal(i, row.Code);
+                Assert.True(table.TryFindPrimaryKeyByTag("tag" + i, out var byTag));
+                Assert.Equal(fresh[i], byTag);
+            }
+
+            Assert.Equal(8, table.CountByName("m"));
+            Assert.Equal(8, table.CountByKind(Kind.C));
+            Assert.Equal(3, table.FindRangeByScore(2, 4).Count());
+        }
+
+        [Fact]
+        public void ClearDuringEnumerationThrows()
+        {
+            var table = new ItemTable();
+            table.TryInsert(NewItem(1), out _);
+            Assert.Throws<InvalidOperationException>(() =>
+            {
+                foreach (ref readonly var _ in table.All()) table.Clear();
+            });
+        }
+
+        [Fact]
+        public void ClearRetiresSaturatedSlots()
+        {
+            var table = new OneGenRowTable();
+            Assert.True(table.TryInsert(new OneGenRow(1), out var a));
+            table.Clear();
+            Assert.False(table.Contains(a));
+            Assert.True(table.TryInsert(new OneGenRow(2), out var b));
+            Assert.NotEqual(a, b);
+            Assert.False(table.Contains(a));
+            Assert.True(table.Contains(b));
+        }
+
+        [Fact]
+        public void ClearKeepsSlotCapacity()
+        {
+            var table = new TinyRowTable();
+            for (var round = 0; round < 3; round++)
+            {
+                var keys = new uint[4];
+                for (var i = 0; i < 4; i++) Assert.True(table.TryInsert(new TinyRow(i), out keys[i]));
+                Assert.False(table.TryInsert(new TinyRow(9), out _));
+                table.Clear();
+                foreach (var key in keys) Assert.False(table.Contains(key));
+            }
+        }
+
+        [Fact]
+        public void UpsertByUniqueKey()
+        {
+            var table = new ItemTable();
+            Assert.True(table.UpsertByCode(NewItem(1, "a", tag: "x"), out var first, out var inserted));
+            Assert.True(inserted);
+            Assert.Equal(1, table.Count);
+
+            Assert.True(table.UpsertByCode(NewItem(1, "b", Kind.C, tag: "y", score: 5), out var again, out inserted));
+            Assert.False(inserted);
+            Assert.Equal(first, again);
+            Assert.Equal(1, table.Count);
+            Assert.True(table.TryFind(first, out var row));
+            Assert.Equal(first, row.Id);
+            Assert.Equal("b", row.Name);
+            Assert.Equal(Kind.C, row.Kind);
+            Assert.Equal(5, row.Score);
+            Assert.False(table.TryFindByTag("x", out _));
+            Assert.True(table.TryFindPrimaryKeyByTag("y", out var byTag));
+            Assert.Equal(first, byTag);
+            Assert.Equal(0, table.CountByName("a"));
+            Assert.Equal(1, table.CountByName("b"));
+
+            // 他の一意キーと衝突する場合は失敗し、何も変更しない
+            Assert.True(table.TryInsert(NewItem(2, tag: "z"), out _));
+            Assert.False(table.UpsertByCode(NewItem(1, "c", tag: "z"), out _, out _));
+            Assert.True(table.TryFind(first, out row));
+            Assert.Equal("b", row.Name);
+            Assert.Equal("y", row.Tag);
+            Assert.False(table.UpsertByTag(NewItem(2, tag: "new"), out _));
+            Assert.Equal(2, table.Count);
+
+            // Tag をキーにして Code を変更
+            Assert.True(table.UpsertByTag(NewItem(7, tag: "y"), out var byTagKey));
+            Assert.Equal(first, byTagKey);
+            Assert.True(table.TryFindPrimaryKeyByCode(7, out var byCode));
+            Assert.Equal(first, byCode);
+            Assert.False(table.TryFindByCode(1, out _));
+        }
+
+        [Fact]
+        public void CountByKey()
+        {
+            var table = new ItemTable();
+            for (var i = 0; i < 30; i++)
+            {
+                table.TryInsert(NewItem(i, "n" + i % 4, (Kind)(i % 3), score: i % 5), out _);
+            }
+
+            Assert.Equal(1, table.CountByCode(3));
+            Assert.Equal(0, table.CountByCode(99));
+            Assert.Equal(1, table.CountByTag("tag3"));
+            Assert.Equal(0, table.CountByTag("none"));
+            Assert.Equal(0, table.CountByTag(null));
+            Assert.Equal(8, table.CountByName("n0"));
+            Assert.Equal(7, table.CountByName("n3"));
+            Assert.Equal(0, table.CountByName("zz"));
+            Assert.Equal(10, table.CountByKind(Kind.A));
+            Assert.Equal(6, table.CountByScore(4));
+
+            table.TryFindPrimaryKeyByCode(0, out var primaryKey);
+            table.Remove(primaryKey);
+            Assert.Equal(7, table.CountByName("n0"));
+            Assert.Equal(9, table.CountByKind(Kind.A));
+            Assert.Equal(5, table.CountByScore(0));
+        }
+
+        [Fact]
+        public void LinqAndCopyTo()
+        {
+            var table = new ItemTable();
+            for (var i = 0; i < 10; i++)
+            {
+                table.TryInsert(NewItem(i, kind: (Kind)(i % 2)), out _);
+            }
+
+            Assert.Equal(45, table.All().Sum(r => r.Code));
+            Assert.Equal(new[] { 1, 3, 5, 7, 9 }, table.FindAllByKind(Kind.B).Select(r => r.Code).OrderBy(c => c));
+            Assert.Equal(new[] { 2, 3, 4 }, table.FindRangeByCode(2, 4).Select(r => r.Code).ToArray());
+            Assert.Equal(10, new List<Item>(table.All()).Count);
+
+            var buffer = new Item[12];
+            Assert.Equal(10, table.CopyTo(buffer));
+            Assert.Equal(Enumerable.Range(0, 10), buffer.Take(10).Select(r => r.Code).OrderBy(c => c));
+            Assert.Throws<ArgumentException>(() => table.CopyTo(new Item[9]));
+
+            Assert.Equal(3, table.FindRangeByCode(2, 4).CopyTo(buffer));
+            Assert.Equal(new[] { 2, 3, 4 }, buffer.Take(3).Select(r => r.Code));
+            Assert.Throws<ArgumentException>(() => table.FindRangeByCode(2, 4).CopyTo(new Item[2]));
+
+            // 列挙中の変更は boxing 経由でも検知される
+            using var e = ((IEnumerable<Item>)table.All()).GetEnumerator();
+            Assert.True(e.MoveNext());
+            table.TryInsert(NewItem(100), out _);
+            Assert.Throws<InvalidOperationException>(() => e.MoveNext());
+        }
+
+        [Fact]
         public void QueriesDoNotAllocate()
         {
             var table = new ItemTable();

@@ -212,6 +212,17 @@ namespace OrdoMemory
             return false;
         }
 
+        // 一意なら O(log n)、重複ありなら該当件数 k に対し O(log n + k)
+        public int CountOf(TKey key)
+        {
+            var e = Equal(key);
+            if (unique) return e.MoveNext() ? 1 : 0;
+
+            var n = 0;
+            while (e.MoveNext()) n++;
+            return n;
+        }
+
         public RangeEnumerator Equal(TKey key)
         {
             return Range(key, key);
@@ -547,6 +558,20 @@ namespace OrdoMemory
             }
 
             return MergeRebuild(keys, primaryKeys);
+        }
+
+        // 確保済みの配列は再利用し、ノードの割り当て状態だけを初期化する
+        public void Clear()
+        {
+            if (lFull != null) Array.Clear(lFull, 0, lFull.Length);
+            if (iFull != null) Array.Clear(iFull, 0, iFull.Length);
+            leafUsed = 0;
+            leafFree = -1;
+            innerUsed = 0;
+            innerFree = -1;
+            root = AllocLeaf();
+            height = 0;
+            count = 0;
         }
 
         public void TrimExcess()

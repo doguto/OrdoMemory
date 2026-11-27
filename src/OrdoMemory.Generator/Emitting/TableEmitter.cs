@@ -43,9 +43,15 @@ namespace OrdoMemory.Generator.Emitting
                                  
                                      {{EmitUpdate(model)}}
                                  
+                                     {{EmitUpsert(model)}}
+                                 
                                      {{EmitRemove(model)}}
                                  
+                                     {{EmitClear(model)}}
+                                 
                                      public {{storeType}}.AllEnumerable All() => __store.All();
+                                 
+                                     public int CopyTo(global::System.Span<{{rowType}}> destination) => __store.All().CopyTo(destination);
                                  
                                      {{Each(model.Keys, key => EmitKeyQueries(model, key, storeType), "\n\n")}}
                                  
@@ -244,8 +250,15 @@ namespace OrdoMemory.Generator.Emitting
                             {
                                 if (!__store.TryGetIndex(primaryKey, out var __index)) return false;
                             
-                                ref var __current = ref __store.GetRowRef(__index);
+                                ref readonly var __current = ref __store.GetRowRef(__index);
                                 var __next = new {{model.RowFullName}}({{arguments}});
+                                return __Replace(primaryKey, __index, in __next);
+                            }
+
+                            // 主キー以外の全フィールドを __next で置き換え、変更されたキーのインデックスを更新する
+                            bool __Replace({{model.PrimaryKeyType}} primaryKey, int __index, in {{model.RowFullName}} __next)
+                            {
+                                ref var __current = ref __store.GetRowRef(__index);
                                 {{Each(keyIndices, keyIndex => EmitDetectKeyChange(model, keyIndex))}}
                                 {{If(uniqueKeyIndices.Count > 0, $"if ({conflictCondition}) return false;")}}
                                 {{Each(keyIndices, keyIndex => EmitApplyKeyChange(model, keyIndex))}}
@@ -275,6 +288,39 @@ namespace OrdoMemory.Generator.Emitting
                             {
                                 {{indexField}}.Remove(__oldKey{{keyIndex}}, primaryKey);
                                 {{indexField}}.Insert(__newKey{{keyIndex}}, primaryKey);
+                            }
+                            """);
+        }
+
+        // 主キーはストアが払い出すため、Upsert の照合には一意セカンダリキーを使う
+        static string EmitUpsert(TableModel model)
+        {
+            var rowType = model.RowFullName;
+            var primaryKeyType = model.PrimaryKeyType;
+            return Each(model.Keys.Where(key => key.Unique), key => Render($$"""
+                                                                          public bool UpsertBy{{key.Field.Name}}(in {{rowType}} row, out {{primaryKeyType}} primaryKey) => UpsertBy{{key.Field.Name}}(in row, out primaryKey, out _);
+
+                                                                          public bool UpsertBy{{key.Field.Name}}(in {{rowType}} row, out {{primaryKeyType}} primaryKey, out bool inserted)
+                                                                          {
+                                                                              if ({{key.IndexField}}.TryGetFirst({{ConvertKey(key, "row." + key.Field.Name)}}, out primaryKey))
+                                                                              {
+                                                                                  inserted = false;
+                                                                                  return __Replace(primaryKey, __store.GetIndex(primaryKey), in row);
+                                                                              }
+                                                                          
+                                                                              inserted = TryInsert(in row, out primaryKey);
+                                                                              return inserted;
+                                                                          }
+                                                                          """), "\n\n");
+        }
+
+        static string EmitClear(TableModel model)
+        {
+            return Render($$"""
+                            public void Clear()
+                            {
+                                __store.Clear();
+                                {{Each(model.Keys, key => $"{key.IndexField}.Clear();")}}
                             }
                             """);
         }
@@ -322,6 +368,8 @@ namespace OrdoMemory.Generator.Emitting
                             }
 
                             public bool {{findFirstPrimaryKeyMethod}}({{fieldType}} key, out {{model.PrimaryKeyType}} primaryKey) => {{indexField}}.TryGetFirst({{ConvertKey(key, "key")}}, out primaryKey);
+
+                            public int CountBy{{fieldName}}({{fieldType}} key) => {{indexField}}.CountOf({{ConvertKey(key, "key")}});
 
                             {{If(!key.Unique, $"public {enumerableType} FindAllBy{fieldName}({fieldType} key) => __store.Subset({indexField}.Equal({ConvertKey(key, "key")}));")}}
 

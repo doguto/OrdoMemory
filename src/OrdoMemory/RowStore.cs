@@ -149,6 +149,13 @@ namespace OrdoMemory
             denseCount = last;
 
             // 削除した Record に割り当てられていた Slot の更新
+            FreeSlot(slotIndex);
+            version++;
+        }
+
+        // slot の世代を進めて空きリストへ戻す
+        void FreeSlot(int slotIndex)
+        {
             ref var slot = ref slots[slotIndex];
             if (slot.generation < maxGeneration)
             {
@@ -162,7 +169,19 @@ namespace OrdoMemory
                 slot.generation = 0;
                 retiredSlotCount++;
             }
+        }
 
+        // 全 Record を削除する
+        // 世代を巻き戻すと古い主キーが再び有効になってしまうため、Remove と同じく各 slot の世代を進めて空きリストへ戻す
+        public void Clear()
+        {
+            for (var i = 0; i < denseCount; i++)
+            {
+                FreeSlot(SlotIndexOf(i));
+            }
+
+            Array.Clear(dense, 0, denseCount);
+            denseCount = 0;
             version++;
         }
 
