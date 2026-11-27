@@ -307,6 +307,7 @@ namespace OrdoMemory.Generator.Emitting
             var enumerableType = $"{storeType}.SubsetEnumerable<{InnerEnumeratorType(model, key)}>";
             var findFirstMethod = key.Unique ? $"TryFindBy{fieldName}" : $"TryFindFirstBy{fieldName}";
             var findFirstPrimaryKeyMethod = key.Unique ? $"TryFindPrimaryKeyBy{fieldName}" : $"TryFindFirstPrimaryKeyBy{fieldName}";
+            var findFirstRefMethod = key.Unique ? $"FindRefBy{fieldName}" : $"FindFirstRefBy{fieldName}";
 
             return Render($$"""
                             public bool {{findFirstMethod}}({{fieldType}} key, out {{rowType}} row)
@@ -319,6 +320,13 @@ namespace OrdoMemory.Generator.Emitting
                             
                                 row = default;
                                 return false;
+                            }
+
+                            public ref readonly {{rowType}} {{findFirstRefMethod}}({{fieldType}} key, out bool found)
+                            {
+                                found = {{indexField}}.TryGetFirst({{ConvertKey(key, "key")}}, out var primaryKey);
+                                if (found) return ref __store.GetRowRef(__store.GetIndex(primaryKey));
+                                return ref __notFound;
                             }
 
                             public bool {{findFirstPrimaryKeyMethod}}({{fieldType}} key, out {{model.PrimaryKeyType}} primaryKey) => {{indexField}}.TryGetFirst({{ConvertKey(key, "key")}}, out primaryKey);

@@ -225,9 +225,9 @@ MySQL (InnoDB) の二次索引と同様に、B+Tree のキーを `(SecondaryKey,
 | BulkInsert     | 新規 Record の一括挿入. PK は出力先の Span に書く |
 | Update         | 既存 Record の部分更新                        |
 | Find           | PK での単一検索 (`TryFind` / `FindRef`)        |
-| FindByXxx      | Unique な SecondaryKey での単一検索            |
+| FindByXxx      | Unique な SecondaryKey での単一検索 (`TryFindByXxx` / `FindRefByXxx`) |
 | FindAllByXxx   | 非 Unique な SecondaryKey での検索              |
-| FindFirstByXxx | 非 Unique な SecondaryKey での単一検索 (索引上の先頭) |
+| FindFirstByXxx | 非 Unique な SecondaryKey での単一検索 (索引上の先頭. `TryFindFirstByXxx` / `FindFirstRefByXxx`) |
 | FindRangeByXxx | SecondaryKey での範囲検索 (`Ordered` のみ) |
 | All            | 全 Record の取得. 順序は保証しない              |
 | Remove         | PK に対応する Record の削除                    |
@@ -249,6 +249,7 @@ public sealed class SampleTable
 
     public AllEnumerable All();
     public bool TryFindFirstByName(string name, out SampleRow row);
+    public ref readonly SampleRow FindFirstRefByName(string name, out bool found);
     public NameEnumerable FindAllByName(string name);
     public NameEnumerable FindRangeByName(string min, string max);
 
@@ -257,6 +258,7 @@ public sealed class SampleTable
 ```
 
 - 列挙は struct で返す (`foreach (ref readonly var row in table.All())`).
+- `FindRef` / `FindRefByXxx` / `FindFirstRefByXxx` は Record をコピーせず `ref readonly` で返す. 見つからない場合は `found = false` とし、`default` の Record への参照を返す. 参照はテーブルを変更する (Insert / Update / Remove / TrimExcess) までの間だけ有効.
 - 比較子は struct をジェネリクスで受けるか、生成コードに埋め込む (仮想呼び出しを避けるため).
 - 単一スレッド前提とする.
 
