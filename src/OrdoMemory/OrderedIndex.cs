@@ -217,38 +217,130 @@ namespace OrdoMemory
             return Range(key, key);
         }
 
+        // 閉区間 [min, max] を昇順に列挙する.
         public RangeEnumerator Range(TKey min, TKey max)
         {
+            return RangeCore(true, min, true, true, max, true, false);
+        }
+
+        // 両端の開閉と列挙の向きを指定して範囲を列挙する.
+        public RangeEnumerator Range(TKey min, bool minInclusive, TKey max, bool maxInclusive, bool descending)
+        {
+            return RangeCore(true, min, minInclusive, true, max, maxInclusive, descending);
+        }
+
+        // key より大きい (inclusive なら以上の) キーを列挙する. 上端は持たない.
+        public RangeEnumerator GreaterThan(TKey key, bool inclusive, bool descending)
+        {
+            return RangeCore(true, key, inclusive, false, default, false, descending);
+        }
+
+        // key より小さい (inclusive なら以下の) キーを列挙する. 下端は持たない.
+        public RangeEnumerator LessThan(TKey key, bool inclusive, bool descending)
+        {
+            return RangeCore(false, default, false, true, key, inclusive, descending);
+        }
+
+        // 索引の全件をキー順に列挙する.
+        public RangeEnumerator All(bool descending)
+        {
+            return RangeCore(false, default, false, false, default, false, descending);
+        }
+
+        RangeEnumerator RangeCore(bool hasMin, TKey min, bool minInclusive, bool hasMax, TKey max, bool maxInclusive, bool descending)
+        {
             var traits = default(TKeyTraits);
-            var minNorm = traits.Normalize(min);
-            var maxNorm = traits.Normalize(max);
-            if (count == 0 || minNorm > maxNorm || (minNorm == maxNorm && NeedsFullComparison && traits.CompareFull(min, max) > 0))
+            if (count == 0) return default;
+
+            if (hasMin && hasMax)
             {
-                return new RangeEnumerator(this, -1, 0, maxNorm, max);
+                var minNorm = traits.Normalize(min);
+                var maxNorm = traits.Normalize(max);
+                var c = minNorm != maxNorm ? (minNorm < maxNorm ? -1 : 1) : NeedsFullComparison ? traits.CompareFull(min, max) : 0;
+                if (c > 0 || (c == 0 && !(minInclusive && maxInclusive))) return default;
             }
 
-            var probe = MakeProbe(min, 0);
-            var leaf = Descend(probe);
-            var pos = LeafLowerBound(leaf, probe);
-            return new RangeEnumerator(this, leaf, pos, maxNorm, max);
+            int leaf;
+            int pos;
+            if (!descending)
+            {
+                if (hasMin)
+                {
+                    Seek(min, !minInclusive, out leaf, out pos);
+                }
+                else
+                {
+                    leaf = LeftmostLeaf();
+                    pos = 0;
+                }
+
+                return new RangeEnumerator(this, leaf, pos, false, hasMax, hasMax ? traits.Normalize(max) : 0, max, maxInclusive);
+            }
+
+            if (hasMax)
+            {
+                // 上端の直後 (inclusive なら max より大きい最初の要素, そうでなければ max 以上の最初の要素) の 1 つ前から始める.
+                Seek(max, maxInclusive, out leaf, out pos);
+                pos--;
+            }
+            else
+            {
+                leaf = RightmostLeaf();
+                pos = lCount[leaf] - 1;
+            }
+
+            return new RangeEnumerator(this, leaf, pos, true, hasMin, hasMin ? traits.Normalize(min) : 0, min, minInclusive);
+        }
+
+        // key 以上 (after なら key より大きい) の最初の要素の位置を求める.
+        // 該当が無い場合は最後の葉の末尾 (pos == lCount) を返す.
+        void Seek(TKey key, bool after, out int leaf, out int pos)
+        {
+            // 非 Unique では (key, PK) の組で並ぶため、PK を最小値 / 最大値にした組で探す.
+            // Unique では PK を比較しないため、after の場合は key と等しい要素を読み飛ばす.
+            var probe = MakeProbe(key, after ? pkMask : 0);
+            leaf = Descend(probe);
+            pos = LeafLowerBound(leaf, probe);
+            var keyNorm = default(TKeyTraits).Normalize(key);
+            while (true)
+            {
+                if (pos >= lCount[leaf])
+                {
+                    var next = lNext[leaf];
+                    if (next < 0) return;
+                    leaf = next;
+                    pos = 0;
+                    continue;
+                }
+
+                if (!after || CompareKey(leaf * b + pos, keyNorm, key) != 0) return;
+                pos++;
+            }
         }
 
         public struct RangeEnumerator : IPrimaryKeyEnumerator<TPrimaryKey>
         {
             readonly OrderedIndex<TKey, TKeyTraits, TPrimaryKey, TPrimaryKeyTraits> index;
-            readonly ulong maxNorm;
-            readonly TKey max;
+            readonly ulong endNorm;
+            readonly TKey end;
+            readonly bool descending;
+            readonly bool hasEnd;
+            readonly bool endInclusive;
             int leaf;
             int pos;
             TPrimaryKey current;
 
-            internal RangeEnumerator(OrderedIndex<TKey, TKeyTraits, TPrimaryKey, TPrimaryKeyTraits> index, int leaf, int pos, ulong maxNorm, TKey max)
+            // default の RangeEnumerator は空の列挙とする (index == null).
+            internal RangeEnumerator(OrderedIndex<TKey, TKeyTraits, TPrimaryKey, TPrimaryKeyTraits> index, int leaf, int pos, bool descending, bool hasEnd, ulong endNorm, TKey end, bool endInclusive)
             {
                 this.index = index;
                 this.leaf = leaf;
                 this.pos = pos;
-                this.maxNorm = maxNorm;
-                this.max = max;
+                this.descending = descending;
+                this.hasEnd = hasEnd;
+                this.endNorm = endNorm;
+                this.end = end;
+                this.endInclusive = endInclusive;
                 current = default;
             }
 
@@ -256,15 +348,25 @@ namespace OrdoMemory
 
             public bool MoveNext()
             {
+                if (index == null) return false;
+                return descending ? MovePrev() : MoveForward();
+            }
+
+            bool MoveForward()
+            {
                 while (leaf >= 0)
                 {
                     if (pos < index.lCount[leaf])
                     {
                         var slot = leaf * index.b + pos;
-                        if (index.CompareKey(slot, maxNorm, max) > 0)
+                        if (hasEnd)
                         {
-                            leaf = -1;
-                            return false;
+                            var c = index.CompareKey(slot, endNorm, end);
+                            if (c > 0 || (c == 0 && !endInclusive))
+                            {
+                                leaf = -1;
+                                return false;
+                            }
                         }
 
                         current = index.PkAtSlot(slot);
@@ -274,6 +376,35 @@ namespace OrdoMemory
 
                     leaf = index.lNext[leaf];
                     pos = 0;
+                }
+
+                return false;
+            }
+
+            bool MovePrev()
+            {
+                while (leaf >= 0)
+                {
+                    if (pos >= 0)
+                    {
+                        var slot = leaf * index.b + pos;
+                        if (hasEnd)
+                        {
+                            var c = index.CompareKey(slot, endNorm, end);
+                            if (c < 0 || (c == 0 && !endInclusive))
+                            {
+                                leaf = -1;
+                                return false;
+                            }
+                        }
+
+                        current = index.PkAtSlot(slot);
+                        pos--;
+                        return true;
+                    }
+
+                    leaf = index.lPrev[leaf];
+                    pos = leaf >= 0 ? index.lCount[leaf] - 1 : -1;
                 }
 
                 return false;
@@ -735,6 +866,17 @@ namespace OrdoMemory
             for (var level = height; level > 0; level--)
             {
                 node = iChild[node * b];
+            }
+
+            return node;
+        }
+
+        int RightmostLeaf()
+        {
+            var node = root;
+            for (var level = height; level > 0; level--)
+            {
+                node = iChild[node * b + iCount[node] - 1];
             }
 
             return node;

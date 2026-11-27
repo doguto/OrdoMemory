@@ -180,7 +180,7 @@ SecondaryKey ごとに、属性で種類を選ぶ.
 
 - ノードはオブジェクトにせず、葉と内部ノードをそれぞれ数本の配列に置いて `int` の番号で指す.
   - 子への参照が 4B になり、参照を辿る回数とGC が走査するオブジェクトが減る.
-- 葉ノードは SecondaryKey の昇順で連結し、`FindRangeByXxx` は葉を辿って範囲を取得する.
+- 葉ノードは SecondaryKey の昇順で前後に連結し、`FindRangeByXxx` などの範囲検索は葉を辿って範囲を取得する. 降順の列挙は前の葉への連結を逆に辿る.
 - 内部ノードの各エントリは (子の最小キー, 子) とする.
 - キーを `ulong` に正規化して比較する.
 
@@ -200,6 +200,18 @@ MySQL (InnoDB) の二次索引と同様に、B+Tree のキーを `(SecondaryKey,
 - 組で比較するため、SecondaryKey が重複していても索引のキーは一意になる.
 - 特定の SecondaryKey の検索は、`(SecondaryKey, PK の最小値)` から `(SecondaryKey, PK の最大値)` までの範囲検索として扱う.
 - Unique な SecondaryKey の索引は、SecondaryKey のみをキーとする.
+
+#### 範囲検索の端点
+
+範囲の下端・上端はそれぞれ「無し / 含む / 含まない」を選べ、列挙の向きは昇順・降順を選べる.
+
+- 開始位置は、端点のキーから次のどちらかを探して求める.
+  - `key` 以上の最初の要素: 非 Unique では `(key, PK の最小値)` 以上の最初の組.
+  - `key` より大きい最初の要素: 非 Unique では `(key, PK の最大値)` 以上の最初の組を探し、それが `key` と等しければ 1 つ進める. Unique では `key` 以上の最初の要素を探し、等しければ 1 つ進める.
+  - PK を正規化キーに詰める場合も、別に持つ場合も同じ考え方で、string のように先頭だけを正規化するキーでは等しさを `CompareFull` で確かめる.
+- 降順では、上端を含むなら「上端より大きい最初の要素」、含まないなら「上端以上の最初の要素」の 1 つ前から始め、前の葉へ辿る.
+- 終了の判定は、列挙の向きの先にある端点とキーだけを比べる (含まない端点では等しいキーで止める).
+- 端点を持たない側は葉の端まで辿るため、string のように最大値の番兵を作れない型でも「x 以上」「x 未満」を表せる.
 
 ### Hash
 
@@ -228,7 +240,10 @@ MySQL (InnoDB) の二次索引と同様に、B+Tree のキーを `(SecondaryKey,
 | FindByXxx      | Unique な SecondaryKey での単一検索            |
 | FindAllByXxx   | 非 Unique な SecondaryKey での検索              |
 | FindFirstByXxx | 非 Unique な SecondaryKey での単一検索 (索引上の先頭) |
-| FindRangeByXxx | SecondaryKey での範囲検索 (`Ordered` のみ) |
+| FindRangeByXxx | SecondaryKey での範囲検索 (`Ordered` のみ). 既定は閉区間・昇順で、端点の開閉と降順を指定できる |
+| FindGreaterThanByXxx | SecondaryKey が指定値より大きい (`inclusive` なら以上の) Record の検索 (`Ordered` のみ) |
+| FindLessThanByXxx | SecondaryKey が指定値より小さい (`inclusive` なら以下の) Record の検索 (`Ordered` のみ) |
+| OrderByXxx | 全 Record を SecondaryKey の順に列挙する (`Ordered` のみ) |
 | All            | 全 Record の取得. 順序は保証しない              |
 | Remove         | PK に対応する Record の削除                    |
 | TrimExcess     | 余った容量を返す                              |
@@ -250,13 +265,17 @@ public sealed class SampleTable
     public AllEnumerable All();
     public bool TryFindFirstByName(string name, out SampleRow row);
     public NameEnumerable FindAllByName(string name);
-    public NameEnumerable FindRangeByName(string min, string max);
+    public NameEnumerable FindRangeByName(string min, string max, bool minInclusive = true, bool maxInclusive = true, bool descending = false);
+    public NameEnumerable FindGreaterThanByName(string key, bool inclusive = false, bool descending = false);
+    public NameEnumerable FindLessThanByName(string key, bool inclusive = false, bool descending = false);
+    public NameEnumerable OrderByName(bool descending = false);
 
     public void TrimExcess();
 }
 ```
 
 - 列挙は struct で返す (`foreach (ref readonly var row in table.All())`).
+- 範囲検索の列挙順は SecondaryKey の昇順 (`descending` なら降順). 非 Unique で SecondaryKey が等しい Record の間では PK の昇順 (降順ならその逆) とする.
 - 比較子は struct をジェネリクスで受けるか、生成コードに埋め込む (仮想呼び出しを避けるため).
 - 単一スレッド前提とする.
 
@@ -287,7 +306,8 @@ public sealed class SampleTable
 | FindByXxx (Unique) | O(log n) | 平均 O(1) |
 | FindFirstByXxx | O(log n) | 平均 O(1) |
 | FindAllByXxx | O(log n + m) | 平均 O(1 + m) |
-| FindRangeByXxx | O(log n + m) | 不可 |
+| FindRangeByXxx / FindGreaterThanByXxx / FindLessThanByXxx | O(log n + m) | 不可 |
+| OrderByXxx | O(log n + n) | 不可 |
 | 一括挿入 (k 件) | O(k log(n+k)), 作り直す場合 O((n+k) + k log k) | 平均 O(k) |
 
 - Ordered: ノードの大きさ B は定数 (64). 高さ log_B n, ノード内の探索とずらしが O(B) で、合わせて O(log n). ノードの分割は償却 O(1).

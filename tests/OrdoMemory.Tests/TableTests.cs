@@ -217,6 +217,76 @@ namespace OrdoMemory.Tests
         }
 
         [Fact]
+        public void RangeQueryOptions()
+        {
+            var table = new ItemTable();
+            var rnd = new Random(42);
+            var rows = new List<(int Code, string Name, double Score)>();
+            for (var i = 0; i < 300; i++)
+            {
+                var code = i * 3 - 200;
+                var name = rnd.Next(20) == 0 ? null : new string('a', rnd.Next(0, 3)) + (char)('a' + rnd.Next(4)) + (rnd.Next(2) == 0 ? "" : "zz");
+                var score = rnd.Next(-5, 6) * 0.5;
+                Assert.True(table.TryInsert(NewItem(code, name, score: score), out _));
+                rows.Add((code, name, score));
+            }
+
+            foreach (var descending in new[] { false, true })
+            {
+                IEnumerable<T> Order<T>(IEnumerable<(int Code, string Name, double Score)> q, Func<(int Code, string Name, double Score), T> key, IComparer<T> comparer)
+                {
+                    // 非 Unique 索引は (キー, PK) 順に並ぶ. PK は挿入順に増えるため、同じキーの中では Code の順になる
+                    var ordered = q.OrderBy(key, comparer).ThenBy(r => r.Code).ToList();
+                    if (descending) ordered.Reverse();
+                    return ordered.Select(r => key(r));
+                }
+
+                foreach (var inclusive in new[] { false, true })
+                {
+                    var codes = new List<int>();
+                    foreach (ref readonly var r in table.FindGreaterThanByCode(100, inclusive, descending)) codes.Add(r.Code);
+                    Assert.Equal(Order(rows.Where(r => inclusive ? r.Code >= 100 : r.Code > 100), r => r.Code, Comparer<int>.Default), codes);
+
+                    codes.Clear();
+                    foreach (ref readonly var r in table.FindLessThanByCode(100, inclusive, descending)) codes.Add(r.Code);
+                    Assert.Equal(Order(rows.Where(r => inclusive ? r.Code <= 100 : r.Code < 100), r => r.Code, Comparer<int>.Default), codes);
+
+                    codes.Clear();
+                    foreach (ref readonly var r in table.FindRangeByCode(-50, 49, inclusive, !inclusive, descending)) codes.Add(r.Code);
+                    Assert.Equal(Order(rows.Where(r => (inclusive ? r.Code >= -50 : r.Code > -50) && (!inclusive ? r.Code <= 49 : r.Code < 49)), r => r.Code, Comparer<int>.Default), codes);
+
+                    foreach (var bound in new[] { null, "", "a", "aa", "ab", "abzz", "b", "c" })
+                    {
+                        var names = new List<string>();
+                        foreach (ref readonly var r in table.FindGreaterThanByName(bound, inclusive, descending)) names.Add(r.Name);
+                        Assert.Equal(Order(rows.Where(r => string.CompareOrdinal(r.Name, bound) is var c && (inclusive ? c >= 0 : c > 0)), r => r.Name, StringComparer.Ordinal), names);
+
+                        names.Clear();
+                        foreach (ref readonly var r in table.FindLessThanByName(bound, inclusive, descending)) names.Add(r.Name);
+                        Assert.Equal(Order(rows.Where(r => string.CompareOrdinal(r.Name, bound) is var c && (inclusive ? c <= 0 : c < 0)), r => r.Name, StringComparer.Ordinal), names);
+
+                        names.Clear();
+                        foreach (ref readonly var r in table.FindRangeByName(bound, "b", inclusive, false, descending)) names.Add(r.Name);
+                        Assert.Equal(Order(rows.Where(r => string.CompareOrdinal(r.Name, bound) is var c && (inclusive ? c >= 0 : c > 0) && string.CompareOrdinal(r.Name, "b") < 0), r => r.Name, StringComparer.Ordinal), names);
+                    }
+
+                    var scores = new List<double>();
+                    foreach (ref readonly var r in table.FindGreaterThanByScore(0, inclusive, descending)) scores.Add(r.Score);
+                    Assert.Equal(Order(rows.Where(r => inclusive ? r.Score >= 0 : r.Score > 0), r => r.Score, Comparer<double>.Default), scores);
+                }
+
+                var all = new List<string>();
+                foreach (ref readonly var r in table.OrderByName(descending)) all.Add(r.Name);
+                Assert.Equal(Order(rows, r => r.Name, StringComparer.Ordinal), all);
+            }
+
+            // 既存の呼び出し (閉区間・昇順) はそのまま使える
+            var closed = new List<int>();
+            foreach (ref readonly var r in table.FindRangeByCode(-50, 49)) closed.Add(r.Code);
+            Assert.Equal(rows.Select(r => r.Code).Where(c => c >= -50 && c <= 49).OrderBy(c => c), closed);
+        }
+
+        [Fact]
         public void ModificationDuringEnumerationThrows()
         {
             var table = new ItemTable();
@@ -383,6 +453,10 @@ namespace OrdoMemory.Tests
                 foreach (ref readonly var r in table.FindRangeByCode(100, 200)) sum += r.Code;
                 foreach (ref readonly var r in table.FindAllByKind(Kind.B)) sum += r.Code;
                 foreach (ref readonly var r in table.FindRangeByScore(10, 20)) sum += r.Code;
+                foreach (ref readonly var r in table.FindRangeByCode(100, 200, false, false, true)) sum += r.Code;
+                foreach (ref readonly var r in table.FindGreaterThanByName("n8", descending: true)) sum += r.Code;
+                foreach (ref readonly var r in table.FindLessThanByCode(50, inclusive: true)) sum += r.Code;
+                foreach (ref readonly var r in table.OrderByScore(descending: true)) sum += r.Code;
                 if (table.TryFindByTag("tag5", out var row)) sum += row.Code;
             }
 

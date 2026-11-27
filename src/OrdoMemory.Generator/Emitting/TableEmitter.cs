@@ -308,6 +308,16 @@ namespace OrdoMemory.Generator.Emitting
             var findFirstMethod = key.Unique ? $"TryFindBy{fieldName}" : $"TryFindFirstBy{fieldName}";
             var findFirstPrimaryKeyMethod = key.Unique ? $"TryFindPrimaryKeyBy{fieldName}" : $"TryFindFirstPrimaryKeyBy{fieldName}";
 
+            var rangeQueries = Render($$"""
+                                        public {{enumerableType}} FindRangeBy{{fieldName}}({{fieldType}} min, {{fieldType}} max, bool minInclusive = true, bool maxInclusive = true, bool descending = false) => __store.Subset({{indexField}}.Range({{ConvertKey(key, "min")}}, minInclusive, {{ConvertKey(key, "max")}}, maxInclusive, descending));
+
+                                        public {{enumerableType}} FindGreaterThanBy{{fieldName}}({{fieldType}} key, bool inclusive = false, bool descending = false) => __store.Subset({{indexField}}.GreaterThan({{ConvertKey(key, "key")}}, inclusive, descending));
+
+                                        public {{enumerableType}} FindLessThanBy{{fieldName}}({{fieldType}} key, bool inclusive = false, bool descending = false) => __store.Subset({{indexField}}.LessThan({{ConvertKey(key, "key")}}, inclusive, descending));
+
+                                        public {{enumerableType}} OrderBy{{fieldName}}(bool descending = false) => __store.Subset({{indexField}}.All(descending));
+                                        """);
+
             return Render($$"""
                             public bool {{findFirstMethod}}({{fieldType}} key, out {{rowType}} row)
                             {
@@ -325,7 +335,7 @@ namespace OrdoMemory.Generator.Emitting
 
                             {{If(!key.Unique, $"public {enumerableType} FindAllBy{fieldName}({fieldType} key) => __store.Subset({indexField}.Equal({ConvertKey(key, "key")}));")}}
 
-                            {{If(!key.Hash, $"public {enumerableType} FindRangeBy{fieldName}({fieldType} min, {fieldType} max) => __store.Subset({indexField}.Range({ConvertKey(key, "min")}, {ConvertKey(key, "max")}));")}}
+                            {{If(!key.Hash, rangeQueries)}}
                             """);
         }
 

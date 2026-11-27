@@ -33,6 +33,27 @@ namespace OrdoMemory.Tests
             {
                 return Entries.Where(e => comparer.Compare(e.Key, min) >= 0 && comparer.Compare(e.Key, max) <= 0).Select(e => e.PrimaryKey);
             }
+
+            public IEnumerable<ulong> Range(bool hasMin, TKey min, bool minInclusive, bool hasMax, TKey max, bool maxInclusive, bool descending)
+            {
+                var q = Entries.Where(e =>
+                {
+                    if (hasMin)
+                    {
+                        var c = comparer.Compare(e.Key, min);
+                        if (c < 0 || (c == 0 && !minInclusive)) return false;
+                    }
+
+                    if (hasMax)
+                    {
+                        var c = comparer.Compare(e.Key, max);
+                        if (c > 0 || (c == 0 && !maxInclusive)) return false;
+                    }
+
+                    return true;
+                }).Select(e => e.PrimaryKey);
+                return descending ? q.Reverse() : q;
+            }
         }
 
         static List<ulong> Collect<TKey, TKT, TPrimaryKey, TPT>(OrderedIndex<TKey, TKT, TPrimaryKey, TPT>.RangeEnumerator e)
@@ -108,6 +129,15 @@ namespace OrdoMemory.Tests
                     var b = nextKey(rnd);
                     Assert.Equal(model.Range(a, b), Collect(index.Range(a, b)));
                     Assert.Equal(model.Range(a, a), Collect(index.Equal(a)));
+                    CheckRangeOptions(index, model, a, b);
+                    if (model.Entries.Count > 0)
+                    {
+                        // 索引に実在するキーを境界にして、等しいキーの扱いを確かめる
+                        var c = model.Entries[rnd.Next(model.Entries.Count)].Key;
+                        var d = model.Entries[rnd.Next(model.Entries.Count)].Key;
+                        CheckRangeOptions(index, model, c, d);
+                        CheckRangeOptions(index, model, c, c);
+                    }
                 }
             }
 
@@ -119,6 +149,65 @@ namespace OrdoMemory.Tests
 
             Assert.Equal(0, index.Count);
             Assert.True(index.Insert(nextKey(rnd), traits.FromUInt64(nextPrimaryKey)));
+        }
+
+        static void CheckRangeOptions<TKey, TKT, TPrimaryKey, TPT>(OrderedIndex<TKey, TKT, TPrimaryKey, TPT> index, Model<TKey> model, TKey a, TKey b)
+            where TKT : struct, IOrderedKeyTraits<TKey>
+            where TPrimaryKey : unmanaged
+            where TPT : struct, IPrimaryKeyTraits<TPrimaryKey>
+        {
+            foreach (var descending in new[] { false, true })
+            {
+                Assert.Equal(model.Range(false, default, false, false, default, false, descending), Collect(index.All(descending)));
+                foreach (var inclusive in new[] { false, true })
+                {
+                    Assert.Equal(model.Range(true, a, inclusive, false, default, false, descending), Collect(index.GreaterThan(a, inclusive, descending)));
+                    Assert.Equal(model.Range(false, default, false, true, a, inclusive, descending), Collect(index.LessThan(a, inclusive, descending)));
+                    foreach (var maxInclusive in new[] { false, true })
+                    {
+                        Assert.Equal(model.Range(true, a, inclusive, true, b, maxInclusive, descending), Collect(index.Range(a, inclusive, b, maxInclusive, descending)));
+                    }
+                }
+            }
+        }
+
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public void RangeOptionsWithManyDuplicates(bool unique)
+        {
+            // 同じキーが複数の葉にまたがる場合と、PK が最大値の要素を含む場合
+            var index = new OrderedIndex<int, Int32Key, uint, UInt32PrimaryKey>(unique, 4);
+            var model = new Model<int>(Comparer<int>.Default);
+            uint primaryKey = 1;
+            for (var key = 0; key < 10; key++)
+            {
+                var n = unique ? 1 : key % 4 == 0 ? 13 : key % 3;
+                for (var i = 0; i < n; i++)
+                {
+                    var pk = key == 4 && i == n - 1 ? uint.MaxValue : primaryKey++;
+                    Assert.True(index.Insert(key * 2, pk));
+                    model.Add(key * 2, pk);
+                }
+            }
+
+            for (var a = -2; a <= 21; a++)
+            {
+                for (var b = -2; b <= 21; b++)
+                {
+                    CheckRangeOptions(index, model, a, b);
+                }
+            }
+        }
+
+        [Fact]
+        public void RangeOptionsOnEmptyIndex()
+        {
+            var index = new OrderedIndex<string, StringKey, uint, UInt32PrimaryKey>(false, 4);
+            var model = new Model<string>(StringComparer.Ordinal);
+            CheckRangeOptions(index, model, "a", "b");
+            CheckRangeOptions(index, model, null, null);
+            Assert.False(default(OrderedIndex<string, StringKey, uint, UInt32PrimaryKey>.RangeEnumerator).MoveNext());
         }
 
         sealed class EqComparer<T> : IEqualityComparer<T>
