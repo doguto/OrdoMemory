@@ -86,21 +86,24 @@ namespace OrdoMemory.Generator.Emitting
                                                                            }
                                                                            """));
 
-            // 主キーは Store で払い出されるまで決まらないため、払い出した後に主キーを差し込んだコピーを作る
+            // 主キーは Store で払い出されるまで決まらないため、払い出した後に主キーを差し込んだコピーを作る.
+            // Update もこのコンストラクタを使う. 利用者が同じ型の並びのコンストラクタを定義していても
+            // 引数の位置で呼び違えないよう、RowInitTag を取る専用のコンストラクタにする
+            var thisArguments = string.Join(", ", model.Fields.Select(field => $"this.{field.Name}"));
             var rowInterface = $"global::OrdoMemory.IRow<{model.RowName}, {model.PrimaryKeyType}>";
             return Render($$"""
                             partial struct {{model.RowName}} : {{rowInterface}}
                             {
                                 {{model.PrimaryKeyType}} {{rowInterface}}.PrimaryKey => {{model.PrimaryKeyField}};
 
-                                {{model.RowName}} {{rowInterface}}.WithPrimaryKey({{model.PrimaryKeyType}} primaryKey) => new {{model.RowName}}(primaryKey, in this);
+                                {{model.RowName}} {{rowInterface}}.WithPrimaryKey({{model.PrimaryKeyType}} primaryKey) => new {{model.RowName}}(default(global::OrdoMemory.RowInitTag), primaryKey, {{thisArguments}});
 
                                 {{publicConstructor}}
 
-                                internal {{model.RowName}}({{model.PrimaryKeyType}} primaryKey, in {{model.RowName}} source)
+                                internal {{model.RowName}}(global::OrdoMemory.RowInitTag __tag, {{model.PrimaryKeyType}} primaryKey, {{parameters}})
                                 {
                                     this.{{model.PrimaryKeyField}} = primaryKey;
-                                    {{Each(model.Fields, field => $"this.{field.Name} = source.{field.Name};")}}
+                                    {{Each(model.Fields, field => $"this.{field.Name} = {field.ParameterName};")}}
                                 }
                             }
                             """);
@@ -233,7 +236,7 @@ namespace OrdoMemory.Generator.Emitting
         static string EmitUpdate(TableModel model)
         {
             var parameters = string.Join(", ", model.Fields.Select(field => $"global::OrdoMemory.Optional<{field.Type}> {field.ParameterName} = default"));
-            var arguments = string.Join(", ", model.Fields.Select(field => $"{field.ParameterName}.OrElse(__current.{field.Name})"));
+            var arguments = string.Join(", ", model.Fields.Select(NextValue));
             var keyIndices = Enumerable.Range(0, model.Keys.Count).ToList();
             var uniqueKeyIndices = keyIndices.Where(keyIndex => model.Keys[keyIndex].Unique).ToList();
             var conflictCondition = string.Join(" || ", uniqueKeyIndices.Select(keyIndex => $"(__changed{keyIndex} && {model.Keys[keyIndex].IndexField}.ContainsKey(__newKey{keyIndex}))"));
@@ -245,16 +248,21 @@ namespace OrdoMemory.Generator.Emitting
                                 if (!__store.TryGetIndex(primaryKey, out var __index)) return false;
                             
                                 ref var __current = ref __store.GetRowRef(__index);
-                                var __next = new {{model.RowFullName}}({{arguments}});
+                                {{Each(model.Fields, field => $"var {NextValue(field)} = {field.ParameterName}.OrElse(__current.{field.Name});")}}
                                 {{Each(keyIndices, keyIndex => EmitDetectKeyChange(model, keyIndex))}}
                                 {{If(uniqueKeyIndices.Count > 0, $"if ({conflictCondition}) return false;")}}
                                 {{Each(keyIndices, keyIndex => EmitApplyKeyChange(model, keyIndex))}}
                             
-                                __current = new {{model.RowFullName}}(primaryKey, in __next);
+                                __current = new {{model.RowFullName}}(default(global::OrdoMemory.RowInitTag), primaryKey, {{arguments}});
                                 {{If(keyIndices.Count > 0, $"if ({anyChangedCondition}) __store.Touch();")}}
                                 return true;
                             }
                             """);
+        }
+
+        static string NextValue(FieldModel field)
+        {
+            return "__next_" + field.Name;
         }
 
         static string EmitDetectKeyChange(TableModel model, int keyIndex)
@@ -262,7 +270,7 @@ namespace OrdoMemory.Generator.Emitting
             var key = model.Keys[keyIndex];
             return Render($$"""
                             var __oldKey{{keyIndex}} = {{ConvertKey(key, "__current." + key.Field.Name)}};
-                            var __newKey{{keyIndex}} = {{ConvertKey(key, "__next." + key.Field.Name)}};
+                            var __newKey{{keyIndex}} = {{ConvertKey(key, NextValue(key.Field))}};
                             var __changed{{keyIndex}} = !global::System.Collections.Generic.EqualityComparer<{{key.KeyType}}>.Default.Equals(__oldKey{{keyIndex}}, __newKey{{keyIndex}});
                             """);
         }

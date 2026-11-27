@@ -171,6 +171,23 @@ namespace OrdoMemory.Tests
             Assert.Equal(1, CountKind(table, Kind.C));
         }
 
+        [Fact]
+        public void UpdateIgnoresUserConstructorParameterOrder()
+        {
+            var table = new SwapRowTable();
+            Assert.True(table.TryInsert(new SwapRow(b: 2, a: 1), out var primaryKey));
+
+            Assert.True(table.Update(primaryKey, a: 10));
+
+            Assert.True(table.TryFind(primaryKey, out var row));
+            Assert.Equal(primaryKey, row.Id);
+            Assert.Equal(10, row.A);
+            Assert.Equal(2, row.B);
+            Assert.False(table.TryFindFirstByA(1, out _));
+            Assert.True(table.TryFindFirstByA(10, out _));
+            Assert.False(table.TryFindFirstByA(2, out _));
+        }
+
         static int CountKind(ItemTable table, Kind kind)
         {
             var n = 0;

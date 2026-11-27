@@ -51,4 +51,22 @@ namespace OrdoMemory.Tests
 
         [SecondaryKey] public readonly int Value;
     }
+
+    // 利用者定義のコンストラクタが、生成されるコンストラクタと同じ型の並びで引数の順番だけ違う
+    [OrdoTable]
+    public readonly partial struct SwapRow
+    {
+        [PrimaryKey] public readonly uint Id;
+
+        [SecondaryKey(Unique = false)] public readonly int A;
+
+        public readonly int B;
+
+        public SwapRow(int b, int a)
+        {
+            Id = 0;
+            A = a;
+            B = b;
+        }
+    }
 }
