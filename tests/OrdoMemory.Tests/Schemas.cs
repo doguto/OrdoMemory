@@ -52,16 +52,20 @@ namespace OrdoMemory.Tests
         [SecondaryKey] public readonly int Value;
     }
 
-    // readonly struct ではなく、キー以外のフィールドは Update でその場で書き換えられる
+    // readonly struct ではなく、readonly でないフィールドは Update でその場で書き換えられる
     [OrdoTable]
     public partial struct Character
     {
         [PrimaryKey] public readonly uint Id;
 
+        // readonly の SecondaryKey. 変わる場合は Record 全体を作り直す
         [SecondaryKey] public readonly int Code;
 
+        // readonly でない SecondaryKey (FK を想定). 索引を付け替えてその場で書き込む
         [SecondaryKey(IndexKind.Hash, Unique = false)]
-        public readonly int Team;
+        public int Team;
+
+        [SecondaryKey(Unique = false)] public string Group;
 
         public int Hp;
 

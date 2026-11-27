@@ -62,7 +62,7 @@ namespace OrdoMemory.Generator.Models
                 return null;
             }
 
-            // partial であることを確認する. readonly struct でなくてもよい (キー以外の readonly でないフィールドは Update でその場で書き換える)
+            // partial であることを確認する. readonly struct でなくてもよい (readonly でないフィールドは Update でその場で書き換える)
             var isPartial = type.DeclaringSyntaxReferences.All(reference =>
                 reference.GetSyntax() is StructDeclarationSyntax declaration && declaration.Modifiers.Any(SyntaxKind.PartialKeyword)
             );
@@ -132,10 +132,12 @@ namespace OrdoMemory.Generator.Models
 
                 var isPrimaryKey = field.GetAttributes().Any(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, primaryKeyAttributeType));
 
-                // PK と SecondaryKey は索引・スロット表と食い違わないよう、Update 以外で書き換えられないようにする
-                if ((isPrimaryKey || keyAttribute != null) && !field.IsReadOnly)
+                // PK は Record とスロットを結び付けるため、書き換えられないようにする.
+                // SecondaryKey は readonly でなくてもよい. テーブルは Record を ref readonly / コピーでしか返さないため、
+                // テーブル内の Record を書き換えられるのは Update のみで、Update は索引を付け替えてから書き込む
+                if (isPrimaryKey && !field.IsReadOnly)
                 {
-                    context.ReportDiagnostic(Diagnostic.Create(Diagnostics.KeyFieldMustBeReadOnly, field.Locations.FirstOrDefault(), field.Name));
+                    context.ReportDiagnostic(Diagnostic.Create(Diagnostics.PrimaryKeyMustBeReadOnly, field.Locations.FirstOrDefault(), field.Name));
                     isValid = false;
                 }
 

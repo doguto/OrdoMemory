@@ -397,8 +397,8 @@ namespace OrdoMemory.Tests
         public void UpdateWritesMutableFieldsInPlace()
         {
             var table = new CharacterTable();
-            Assert.True(table.TryInsert(new Character(10, 1, 100, "a"), out var first));
-            Assert.True(table.TryInsert(new Character(20, 1, 50, "b"), out var second));
+            Assert.True(table.TryInsert(new Character(10, 1, "g", 100, "a"), out var first));
+            Assert.True(table.TryInsert(new Character(20, 1, "g", 50, "b"), out var second));
 
             Assert.True(table.Update(first, hp: 70));
             ref readonly var row = ref table.FindRef(first, out _);
@@ -423,8 +423,8 @@ namespace OrdoMemory.Tests
         public void UpdateChangesKeysAndMutableFieldsTogether()
         {
             var table = new CharacterTable();
-            Assert.True(table.TryInsert(new Character(10, 1, 100, "a"), out var primaryKey));
-            Assert.True(table.TryInsert(new Character(20, 2, 100, "b"), out _));
+            Assert.True(table.TryInsert(new Character(10, 1, "g", 100, "a"), out var primaryKey));
+            Assert.True(table.TryInsert(new Character(20, 2, "g", 100, "b"), out _));
 
             Assert.True(table.Update(primaryKey, code: 11, team: 2, hp: 5));
             Assert.False(table.TryFindByCode(10, out _));
@@ -441,10 +441,38 @@ namespace OrdoMemory.Tests
         }
 
         [Fact]
+        public void UpdateMutableSecondaryKeyInPlace()
+        {
+            var table = new CharacterTable();
+            Assert.True(table.TryInsert(new Character(10, 1, "g", 100, "a"), out var primaryKey));
+            Assert.True(table.TryInsert(new Character(20, 1, "g", 100, "b"), out _));
+
+            // readonly でない SecondaryKey (FK) の変更は、索引を付け替えてその場で書き込む
+            Assert.True(table.Update(primaryKey, team: 2, group: "h", hp: 1));
+            ref readonly var row = ref table.FindRef(primaryKey, out _);
+            Assert.Equal(2, row.Team);
+            Assert.Equal("h", row.Group);
+            Assert.Equal(1, row.Hp);
+            Assert.Equal(10, row.Code);
+            Assert.Equal(1, CountTeam(table, 1));
+            Assert.Equal(1, CountTeam(table, 2));
+            Assert.True(table.TryFindFirstByGroup("h", out var byGroup));
+            Assert.Equal(primaryKey, byGroup.Id);
+            Assert.True(table.TryFindFirstByGroup("g", out var other));
+            Assert.NotEqual(primaryKey, other.Id);
+
+            // 索引の構造が変わるため、列挙中の FK の変更は例外になる
+            Assert.Throws<InvalidOperationException>(() =>
+            {
+                foreach (ref readonly var _ in table.All()) table.Update(primaryKey, team: 3);
+            });
+        }
+
+        [Fact]
         public void UpdateMutableFieldsDuringEnumeration()
         {
             var table = new CharacterTable();
-            for (var i = 0; i < 10; i++) table.TryInsert(new Character(i, i % 2, i, null), out _);
+            for (var i = 0; i < 10; i++) table.TryInsert(new Character(i, i % 2, "g", i, null), out _);
 
             // キーが変わらない Update は構造を変えないため、列挙中でも行える
             foreach (ref readonly var row in table.All()) table.Update(row.Id, hp: row.Hp + 100);
@@ -456,7 +484,7 @@ namespace OrdoMemory.Tests
         public void UpdateMissingPrimaryKey()
         {
             var table = new CharacterTable();
-            Assert.True(table.TryInsert(new Character(10, 1, 100, "a"), out var primaryKey));
+            Assert.True(table.TryInsert(new Character(10, 1, "g", 100, "a"), out var primaryKey));
             Assert.True(table.Remove(primaryKey));
             Assert.False(table.Update(primaryKey, hp: 1));
             Assert.False(table.Update(CharacterTable.InvalidPrimaryKey, hp: 1));

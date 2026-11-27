@@ -56,9 +56,9 @@ namespace OrdoMemory.Generator
             "PrimaryKey '{0}' cannot also be marked with [SecondaryKey]",
             Category, DiagnosticSeverity.Error, true);
 
-        public static readonly DiagnosticDescriptor KeyFieldMustBeReadOnly = new(
-            "OM011", "Key field must be readonly",
-            "PrimaryKey / SecondaryKey field '{0}' must be readonly",
+        public static readonly DiagnosticDescriptor PrimaryKeyMustBeReadOnly = new(
+            "OM011", "PrimaryKey must be readonly",
+            "PrimaryKey '{0}' must be readonly",
             Category, DiagnosticSeverity.Error, true);
 
         public static readonly DiagnosticDescriptor MemberShouldBeReadOnly = new(

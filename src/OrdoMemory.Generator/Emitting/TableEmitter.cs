@@ -250,15 +250,16 @@ namespace OrdoMemory.Generator.Emitting
                                    return true;
                                    """);
 
-            // readonly でないフィールドだけなら、指定されたフィールドをその場で書き換える.
-            // キー (readonly 必須) が変わる場合と、readonly のフィールドが指定された場合は、従来どおり Record 全体を作り直す
-            var mutableFields = model.Fields.Where(field => !field.IsReadOnly).ToList();
+            // readonly のフィールドを変える場合だけ、従来どおり Record 全体を作り直す.
+            // それ以外は索引を付け替えた後、指定された readonly でないフィールドだけをその場で書き込む
             var body = rebuild;
-            if (mutableFields.Count > 0)
+            if (model.Fields.Any(field => !field.IsReadOnly))
             {
-                var rebuildConditions = keyIndices.Select(keyIndex => $"__changed{keyIndex}")
+                var mutableKeyIndices = keyIndices.Where(keyIndex => !model.Keys[keyIndex].Field.IsReadOnly).ToList();
+                var rebuildConditions = keyIndices.Where(keyIndex => model.Keys[keyIndex].Field.IsReadOnly).Select(keyIndex => $"__changed{keyIndex}")
                                                   .Concat(model.Fields.Where(field => field.IsReadOnly && !model.Keys.Any(key => key.Field == field)).Select(field => $"{field.ParameterName}.HasValue"))
                                                   .ToList();
+                var mutableKeyChanged = string.Join(" || ", mutableKeyIndices.Select(keyIndex => $"__changed{keyIndex}"));
                 body = Render($$"""
                                 {{If(rebuildConditions.Count > 0, Render($$"""
                                                                            if ({{string.Join(" || ", rebuildConditions)}})
@@ -267,7 +268,9 @@ namespace OrdoMemory.Generator.Emitting
                                                                            }
                                                                            """))}}
 
-                                {{Each(mutableFields, field => $"if ({field.ParameterName}.HasValue) __current.{field.Name} = {field.ParameterName}.Value;")}}
+                                {{Each(mutableKeyIndices, keyIndex => EmitApplyKeyChange(model, keyIndex))}}
+                                {{Each(model.Fields.Where(field => !field.IsReadOnly), field => $"if ({field.ParameterName}.HasValue) __current.{field.Name} = {field.ParameterName}.Value;")}}
+                                {{If(mutableKeyIndices.Count > 0, $"if ({mutableKeyChanged}) __store.Touch();")}}
                                 return true;
                                 """);
             }

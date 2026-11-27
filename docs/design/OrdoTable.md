@@ -61,11 +61,12 @@ int freeHead;
   - Record ごとのオブジェクトヘッダと参照が無くなり、GC が管理するオブジェクトも配列数本だけになる.
   - 値で受け取るため、同じインスタンスを二重に Insert するという問題が起こり得ない.
 - `partial struct` とする. `readonly struct` でもよい.
-- PK と SecondaryKey のフィールドには `readonly` を必須とする (OM011). 索引・スロット表との食い違いを防ぐため, これらの書き換えは Update 経由のみとする.
-- キー以外のフィールドは `readonly` を外してよい. 外したフィールドは Update がその場で書き換える.
+- PK のフィールドには `readonly` を必須とする (OM011). PK は Record とスロットを結び付けるため, Update でも書き換えない.
+- PK 以外のフィールド (SecondaryKey を含む) は `readonly` を外してよい. 外したフィールドは Update がその場で書き換える.
   - Record 全体を作り直して上書きすると, 大きな Record の一部だけを頻繁に書き換える場合に遅いため (64 フィールド・約 260B の Record で 1 フィールドの更新が約 95ns に対し, その場で書き換えると約 43ns).
-  - キーが変わる場合と, `readonly` のフィールドが指定された場合は, 従来どおり Record 全体を作り直す. 値が同じキーを指定しても変更なしとして扱う.
-  - 検索 (`FindRef` など) は従来どおり `ref readonly` で返すため, 検索結果からは書き換えられない. 書き換えは Update 経由のみ.
+  - SecondaryKey (FK など) が変わる場合は, 索引を付け替えた後にそのフィールドだけを書き込む.
+  - `readonly` のフィールドを変える場合だけ, 従来どおり Record 全体を作り直す. 値が同じキーを指定しても変更なしとして扱う.
+  - テーブルは Record を `ref readonly` かコピーでしか返さないため, `readonly` を外してもテーブル内の Record を書き換えられるのは Update のみで, 索引と食い違うことはない.
 - `readonly struct` でない場合, 利用者が定義するメソッド・プロパティには `readonly` 修飾子を付ける (付けなければ OM012 の警告). `ref readonly` / `in` で受け取ったときの隠れたコピー (defensive copy) を防ぐため. フィールドの読み取りではコピーは起きない.
   - 生成するメンバー (`IRow` の実装) には `readonly` を付ける.
 - `[PrimaryKey]` を付けたフィールドを必ず 1 つ持つ. 型は PK の型 (`uint` / `ulong`) と一致させる.
@@ -166,7 +167,7 @@ return ref dense[s.dense];
   - Remove: 末尾の Record が移動するため.
   - Insert / BulkInsert: 配列の拡張で再確保されるため.
 - 列挙中の Insert / Remove は `version` で検出し、例外とする.
-  - キーが変わらない Update は構造を変えないため, 列挙中でも行える.
+  - SecondaryKey が変わらない Update は構造を変えないため, 列挙中でも行える.
 
 ---
 
