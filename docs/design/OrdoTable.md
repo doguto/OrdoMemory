@@ -127,6 +127,13 @@ return ref dense[s.dense];
 2. 払い出す PK を差し込んだ Record を `dense[count]` に書き込み、`slots[slot].dense = count` とする.
 3. PK = `(generation << SlotBits) | slot` を返す.
 
+- Unique な SecondaryKey を持つ場合、重複の確認と挿入で索引を 2 回探索しないよう、次の順に行う.
+  1. 次に払い出す PK を、状態を変えずに求める (`RowStore.PeekNextPrimaryKey`).
+  2. その PK で Unique な索引へ挿入し、`Insert` の戻り値で重複を検出する. 重複した場合は、それまでに挿入した索引から取り除いて失敗とする.
+  3. 容量を確保できない場合も、挿入した索引から取り除いて失敗とする.
+  4. Record を書き込み (上記 1〜3)、非 Unique な索引へ挿入する.
+- 失敗した場合、Record・索引・version はいずれも変わらない.
+
 ### BulkInsert
 
 - 払い出す PK は連続しないため、PK を書き込む出力先 (Span) を引数で受け取る.
@@ -137,6 +144,7 @@ return ref dense[s.dense];
 
 - 指定した項目だけを更新する (`Optional<T>`). アロケーションは発生しない.
 - SecondaryKey が変わらない場合は索引を更新しない. 変わる場合は、変更前の値で索引から削除し、変更後の値で挿入する.
+- Unique な索引は、変更後の値を先に挿入し、`Insert` の戻り値で重複を検出する. 重複した場合は、それまでに挿入した変更後の値を取り除いて失敗とし、Record・索引・version は変わらない. すべて挿入できた後で変更前の値を削除する.
 
 ### Remove
 
