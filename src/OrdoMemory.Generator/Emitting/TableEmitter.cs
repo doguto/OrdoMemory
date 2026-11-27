@@ -145,7 +145,7 @@ namespace OrdoMemory.Generator.Emitting
                             {
                                 {{removeFromIndexes}}
                             
-                                for (var i = 0; i < rows.Length; i++) __store.RemoveAt(__store.Count - 1);
+                                for (var i = 0; i < rows.Length; i++) __store.Remove(__store.Count - 1);
                             }
                             """);
         }
@@ -192,7 +192,7 @@ namespace OrdoMemory.Generator.Emitting
                             {
                                 if (__store.TryGetIndex(primaryKey, out var index))
                                 {
-                                    row = __store.RowAt(index);
+                                    row = __store.GetRowRef(index);
                                     return true;
                                 }
                             
@@ -203,7 +203,7 @@ namespace OrdoMemory.Generator.Emitting
                             public ref readonly {{rowType}} FindRef({{primaryKeyType}} primaryKey, out bool found)
                             {
                                 found = __store.TryGetIndex(primaryKey, out var index);
-                                if (found) return ref __store.RowAt(index);
+                                if (found) return ref __store.GetRowRef(index);
                                 return ref __notFound;
                             }
                             """);
@@ -223,7 +223,7 @@ namespace OrdoMemory.Generator.Emitting
                             {
                                 if (!__store.TryGetIndex(primaryKey, out var __index)) return false;
                             
-                                ref var __current = ref __store.RowAt(__index);
+                                ref var __current = ref __store.GetRowRef(__index);
                                 var __next = new {{model.RowFullName}}({{arguments}});
                                 {{Each(keyIndices, keyIndex => EmitDetectKeyChange(model, keyIndex))}}
                                 {{If(uniqueKeyIndices.Count > 0, $"if ({conflictCondition}) return false;")}}
@@ -261,7 +261,7 @@ namespace OrdoMemory.Generator.Emitting
         static string EmitRemove(TableModel model)
         {
             var removeFromIndexes = If(model.Keys.Count > 0, Render($$"""
-                                                                      ref readonly var row = ref __store.RowAt(index);
+                                                                      ref readonly var row = ref __store.GetRowRef(index);
                                                                       {{Each(model.Keys, key => $"{key.IndexField}.Remove({ConvertKey(key, "row." + key.Field.Name)}, primaryKey);")}}
                                                                       """));
 
@@ -271,7 +271,7 @@ namespace OrdoMemory.Generator.Emitting
                                 if (!__store.TryGetIndex(primaryKey, out var index)) return false;
                             
                                 {{removeFromIndexes}}
-                                __store.RemoveAt(index);
+                                __store.Remove(index);
                                 return true;
                             }
                             """);
@@ -283,7 +283,7 @@ namespace OrdoMemory.Generator.Emitting
             var fieldName = key.Field.Name;
             var fieldType = key.Field.Type;
             var indexField = key.IndexField;
-            var enumerableType = $"{storeType}.IndexEnumerable<{InnerEnumeratorType(model, key)}>";
+            var enumerableType = $"{storeType}.SubsetEnumerable<{InnerEnumeratorType(model, key)}>";
             var findFirstMethod = key.Unique ? $"TryFindBy{fieldName}" : $"TryFindFirstBy{fieldName}";
             var findFirstPrimaryKeyMethod = key.Unique ? $"TryFindPrimaryKeyBy{fieldName}" : $"TryFindFirstPrimaryKeyBy{fieldName}";
 
@@ -292,7 +292,7 @@ namespace OrdoMemory.Generator.Emitting
                             {
                                 if ({{indexField}}.TryGetFirst({{ConvertKey(key, "key")}}, out var primaryKey))
                                 {
-                                    row = __store.RowAt(__store.IndexOf(primaryKey));
+                                    row = __store.GetRowRef(__store.GetIndex(primaryKey));
                                     return true;
                                 }
                             
@@ -302,9 +302,9 @@ namespace OrdoMemory.Generator.Emitting
 
                             public bool {{findFirstPrimaryKeyMethod}}({{fieldType}} key, out {{model.PrimaryKeyType}} primaryKey) => {{indexField}}.TryGetFirst({{ConvertKey(key, "key")}}, out primaryKey);
 
-                            {{If(!key.Unique, $"public {enumerableType} FindAllBy{fieldName}({fieldType} key) => __store.Enumerate({indexField}.Equal({ConvertKey(key, "key")}));")}}
+                            {{If(!key.Unique, $"public {enumerableType} FindAllBy{fieldName}({fieldType} key) => __store.Subset({indexField}.Equal({ConvertKey(key, "key")}));")}}
 
-                            {{If(!key.Hash, $"public {enumerableType} FindRangeBy{fieldName}({fieldType} min, {fieldType} max) => __store.Enumerate({indexField}.Range({ConvertKey(key, "min")}, {ConvertKey(key, "max")}));")}}
+                            {{If(!key.Hash, $"public {enumerableType} FindRangeBy{fieldName}({fieldType} min, {fieldType} max) => __store.Subset({indexField}.Range({ConvertKey(key, "min")}, {ConvertKey(key, "max")}));")}}
                             """);
         }
 

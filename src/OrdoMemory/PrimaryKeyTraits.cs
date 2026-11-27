@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 
 namespace OrdoMemory
 {
+    // PK とする型に関する情報
     public interface IPrimaryKeyTraits<TPrimaryKey> where TPrimaryKey : unmanaged
     {
         int Bits { get; }

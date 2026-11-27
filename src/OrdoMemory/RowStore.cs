@@ -3,34 +3,44 @@ using System.Runtime.CompilerServices;
 
 namespace OrdoMemory
 {
-    public sealed class RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits>
+    public sealed partial class RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits>
         where TRow : struct
         where TPrimaryKey : unmanaged
         where TPrimaryKeyTraits : struct, IPrimaryKeyTraits<TPrimaryKey>
     {
-        const int MinGrowLength = 4;
+        const int MinGrowLength = 4; // データ配列の長さ更新時の更新量の下限
         const int MaxArrayLength = 0x7FFFFFC7;
 
+        // 生データを示す dense 配列の Index を持つ構造体
         struct Slot
         {
             public int dense;
             public uint generation;
         }
 
-        readonly int slotBits;
-        readonly ulong slotMask;
+        readonly int slotBits;   // slot に割り当てる bit 数
+        readonly ulong slotMask; // pk & slotMask で pk から slot 部を取り出す
         readonly int maxSlots;
         readonly uint maxGeneration;
 
+        // 実データ
         TRow[] dense;
-        int[] denseToSlot;
-        int count;
+        int[] denseIndexToSlotIndex;
+        int denseCount;
 
+        // 主キーの Slot 部から dense 配列上の位置を求める中間配列
+        // 空き Slot を指す 連結リストも兼ねる
         Slot[] slots;
         int slotCount;
-        int freeHead = -1;
-        int retired;
 
+        // 空き Slot の Index を指す
+        // freeHead で指された Index の slots[] から、 free 部の連結リストになっている
+        int freeHead = -1;
+
+        // Generation を最大まで使い切り使用不可となった slot 数
+        int retiredSlotCount;
+
+        // 変更検知用の値. 変更をかける度に Increment
         int version;
 
         public RowStore(int capacity, int slotBits)
@@ -45,11 +55,11 @@ namespace OrdoMemory
 
             if (capacity < 0 || capacity > maxSlots) throw new ArgumentOutOfRangeException(nameof(capacity));
             dense = new TRow[capacity];
-            denseToSlot = new int[capacity];
+            denseIndexToSlotIndex = new int[capacity];
             slots = new Slot[capacity];
         }
 
-        public int Count => count;
+        public int Count => denseCount;
 
         public int Capacity => dense.Length;
 
@@ -79,34 +89,35 @@ namespace OrdoMemory
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ref TRow RowAt(int index)
+        public ref TRow GetRowRef(int denseIndex)
         {
-            return ref dense[index];
+            return ref dense[denseIndex];
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public int IndexOf(TPrimaryKey primaryKey)
+        public int GetIndex(TPrimaryKey primaryKey)
         {
             return slots[(int)(default(TPrimaryKeyTraits).ToUInt64(primaryKey) & slotMask)].dense;
         }
 
-        public TPrimaryKey PrimaryKeyAt(int index)
+        public TPrimaryKey GetPrimaryKey(int denseIndex)
         {
-            var slot = denseToSlot[index];
+            var slot = denseIndexToSlotIndex[denseIndex];
             return MakePrimaryKey(slots[slot].generation, slot);
         }
 
+        // Insert 前に挿入する個数分の空き容量があることを確認する
         public bool TryReserve(int required)
         {
             if (required < 0) throw new ArgumentOutOfRangeException(nameof(required));
 
-            var freeSlots = slotCount - count - retired;
-            var newSlots = Math.Max(0, required - freeSlots);
-            if ((long)slotCount + newSlots > maxSlots) return false;
+            var freeSlotCount = slotCount - denseCount - retiredSlotCount;
+            var newSlotCount = Math.Max(0, required - freeSlotCount);
+            if ((long)slotCount + newSlotCount > maxSlots) return false;
 
-            EnsureCapacity(ref dense, count + required);
-            EnsureCapacity(ref denseToSlot, count + required);
-            EnsureCapacity(ref slots, slotCount + newSlots);
+            EnsureCapacity(ref dense, denseCount + required);
+            EnsureCapacity(ref denseIndexToSlotIndex, denseCount + required);
+            EnsureCapacity(ref slots, slotCount + newSlotCount);
             return true;
         }
 
@@ -124,71 +135,59 @@ namespace OrdoMemory
                 slots[slot].generation = 1;
             }
 
-            dense[count] = row;
-            denseToSlot[count] = slot;
-            slots[slot].dense = count;
-            count++;
+            dense[denseCount] = row;
+            denseIndexToSlotIndex[denseCount] = slot;
+            slots[slot].dense = denseCount;
+            denseCount++;
             version++;
             return MakePrimaryKey(slots[slot].generation, slot);
         }
 
-        public void RemoveAt(int index)
+        public void Remove(int denseIndex)
         {
-            var slot = denseToSlot[index];
-            var last = count - 1;
-            if (index != last)
+            var slotIndex = denseIndexToSlotIndex[denseIndex];
+            var last = denseCount - 1;
+            if (denseIndex != last)
             {
-                dense[index] = dense[last];
-                denseToSlot[index] = denseToSlot[last];
-                slots[denseToSlot[index]].dense = index;
+                // dense 配列を常に密にするため、末尾要素を削除により空いた箇所にコピーする
+                dense[denseIndex] = dense[last];
+                denseIndexToSlotIndex[denseIndex] = denseIndexToSlotIndex[last];
+                slots[denseIndexToSlotIndex[denseIndex]].dense = denseIndex;
             }
 
             dense[last] = default;
-            count = last;
+            denseCount = last;
 
-            ref var s = ref slots[slot];
-            if (s.generation < maxGeneration)
+            // 削除した Record に割り当てられていた Slot の更新
+            ref var slot = ref slots[slotIndex];
+            if (slot.generation < maxGeneration)
             {
-                s.generation++;
-                s.dense = freeHead;
-                freeHead = slot;
+                slot.generation++;
+                slot.dense = freeHead;
+                freeHead = slotIndex;
             }
             else
             {
-                s.generation = 0;
-                retired++;
+                // Generation が飽和していた場合は使用不可にする
+                slot.generation = 0;
+                retiredSlotCount++;
             }
 
             version++;
         }
 
+        // dense の ref を使用して外から更新する場合は、 Touch() で version を明示的に更新する
         public void Touch()
         {
             version++;
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void CheckVersion(int expected)
-        {
-            if (expected != version) ThrowModified();
-        }
-
         public void TrimExcess()
         {
-            Array.Resize(ref dense, count);
-            Array.Resize(ref denseToSlot, count);
+            Array.Resize(ref dense, denseCount);
+            Array.Resize(ref denseIndexToSlotIndex, denseCount);
             Array.Resize(ref slots, slotCount);
             version++;
-        }
-
-        public AllEnumerable All()
-        {
-            return new AllEnumerable(this);
-        }
-
-        public IndexEnumerable<TPrimaryKeyEnumerator> Enumerate<TPrimaryKeyEnumerator>(TPrimaryKeyEnumerator primaryKeys) where TPrimaryKeyEnumerator : struct, IPrimaryKeyEnumerator<TPrimaryKey>
-        {
-            return new IndexEnumerable<TPrimaryKeyEnumerator>(this, primaryKeys);
         }
 
         TPrimaryKey MakePrimaryKey(uint generation, int slot)
@@ -199,99 +198,10 @@ namespace OrdoMemory
         void EnsureCapacity<T>(ref T[] array, int required)
         {
             if (required <= array.Length) return;
-            var newLength = (int)Math.Min(Math.Max(Math.Max((long)array.Length * 2, MinGrowLength), required), maxSlots);
-            Array.Resize(ref array, newLength);
-        }
 
-        static void ThrowModified()
-        {
-            throw new InvalidOperationException("The table was modified during enumeration.");
-        }
-
-        public readonly struct AllEnumerable
-        {
-            readonly RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits> store;
-
-            internal AllEnumerable(RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits> store)
-            {
-                this.store = store;
-            }
-
-            public AllEnumerator GetEnumerator()
-            {
-                return new AllEnumerator(store);
-            }
-        }
-
-        public struct AllEnumerator
-        {
-            readonly RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits> store;
-            readonly int version;
-            int index;
-
-            internal AllEnumerator(RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits> store)
-            {
-                this.store = store;
-                version = store.version;
-                index = -1;
-            }
-
-            public ref readonly TRow Current => ref store.dense[index];
-
-            public TPrimaryKey CurrentPrimaryKey => store.PrimaryKeyAt(index);
-
-            public bool MoveNext()
-            {
-                store.CheckVersion(version);
-                return ++index < store.count;
-            }
-        }
-
-        public readonly struct IndexEnumerable<TPrimaryKeyEnumerator> where TPrimaryKeyEnumerator : struct, IPrimaryKeyEnumerator<TPrimaryKey>
-        {
-            readonly RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits> store;
-            readonly TPrimaryKeyEnumerator primaryKeys;
-            readonly int version;
-
-            internal IndexEnumerable(RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits> store, TPrimaryKeyEnumerator primaryKeys)
-            {
-                this.store = store;
-                this.primaryKeys = primaryKeys;
-                version = store.version;
-            }
-
-            public IndexEnumerator<TPrimaryKeyEnumerator> GetEnumerator()
-            {
-                return new IndexEnumerator<TPrimaryKeyEnumerator>(store, primaryKeys, version);
-            }
-        }
-
-        public struct IndexEnumerator<TPrimaryKeyEnumerator> where TPrimaryKeyEnumerator : struct, IPrimaryKeyEnumerator<TPrimaryKey>
-        {
-            readonly RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits> store;
-            readonly int version;
-            TPrimaryKeyEnumerator primaryKeys;
-            int index;
-
-            internal IndexEnumerator(RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits> store, TPrimaryKeyEnumerator primaryKeys, int version)
-            {
-                this.store = store;
-                this.primaryKeys = primaryKeys;
-                this.version = version;
-                index = -1;
-            }
-
-            public ref readonly TRow Current => ref store.dense[index];
-
-            public TPrimaryKey CurrentPrimaryKey => primaryKeys.Current;
-
-            public bool MoveNext()
-            {
-                store.CheckVersion(version);
-                if (!primaryKeys.MoveNext()) return false;
-                index = store.IndexOf(primaryKeys.Current);
-                return true;
-            }
+            var doubled = Math.Max((long)array.Length * 2, MinGrowLength);
+            var newLength = Math.Clamp(doubled, required, maxSlots);
+            Array.Resize(ref array, (int)newLength);
         }
     }
 }
