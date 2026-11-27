@@ -13,7 +13,7 @@ namespace OrdoMemory.Generator.Emitting
             var storeType = $"global::OrdoMemory.RowStore<{rowType}, {primaryKeyType}, {model.PrimaryKeyTraits}>";
 
             var table = Render($$"""
-                                 {{If(model.GenerateConstructor, EmitConstructor(model))}}
+                                 {{EmitRowConstructors(model)}}
 
                                  {{model.Accessibility}} sealed partial class {{model.TableName}}
                                  {
@@ -75,15 +75,27 @@ namespace OrdoMemory.Generator.Emitting
                             """) + "\n";
         }
 
-        static string EmitConstructor(TableModel model)
+        static string EmitRowConstructors(TableModel model)
         {
             var parameters = string.Join(", ", model.Fields.Select(field => $"{field.Type} {field.ParameterName}"));
+            var publicConstructor = If(model.GenerateConstructor, Render($$"""
+                                                                           public {{model.RowName}}({{parameters}})
+                                                                           {
+                                                                               this.{{model.PrimaryKeyField}} = default;
+                                                                               {{Each(model.Fields, field => $"this.{field.Name} = {field.ParameterName};")}}
+                                                                           }
+                                                                           """));
+
+            // 主キーは Store で払い出されるまで決まらないため、払い出した後に主キーを差し込んだコピーを作る
             return Render($$"""
                             partial struct {{model.RowName}}
                             {
-                                public {{model.RowName}}({{parameters}})
+                                {{publicConstructor}}
+
+                                internal {{model.RowName}}({{model.PrimaryKeyType}} primaryKey, in {{model.RowName}} source)
                                 {
-                                    {{Each(model.Fields, field => $"this.{field.Name} = {field.ParameterName};")}}
+                                    this.{{model.PrimaryKeyField}} = primaryKey;
+                                    {{Each(model.Fields, field => $"this.{field.Name} = source.{field.Name};")}}
                                 }
                             }
                             """);
@@ -106,6 +118,7 @@ namespace OrdoMemory.Generator.Emitting
                                 }
                             
                                 primaryKey = __store.Store(in row);
+                                __store.GetRowRef(__store.GetIndex(primaryKey)) = new {{model.RowFullName}}(primaryKey, in row);
                                 {{Each(model.Keys, key => $"{key.IndexField}.Insert({ConvertKey(key, "row." + key.Field.Name)}, primaryKey);")}}
                                 return true;
                             }
@@ -133,7 +146,13 @@ namespace OrdoMemory.Generator.Emitting
                                 if (rowCount == 0) return true;
                                 if (!__store.TryReserve(rowCount)) return false;
                             
-                                for (var i = 0; i < rowCount; i++) primaryKeys[i] = __store.Store(in rows[i]);
+                                for (var i = 0; i < rowCount; i++)
+                                {
+                                    var primaryKey = __store.Store(in rows[i]);
+                                    __store.GetRowRef(__store.GetIndex(primaryKey)) = new {{rowType}}(primaryKey, in rows[i]);
+                                    primaryKeys[i] = primaryKey;
+                                }
+
                                 global::System.ReadOnlySpan<{{primaryKeyType}}> stored = primaryKeys.Slice(0, rowCount);
                             
                                 {{Each(keyIndices, keyIndex => EmitBulkInsertIndex(model, keyIndex), "\n\n")}}
@@ -229,7 +248,7 @@ namespace OrdoMemory.Generator.Emitting
                                 {{If(uniqueKeyIndices.Count > 0, $"if ({conflictCondition}) return false;")}}
                                 {{Each(keyIndices, keyIndex => EmitApplyKeyChange(model, keyIndex))}}
                             
-                                __current = __next;
+                                __current = new {{model.RowFullName}}(primaryKey, in __next);
                                 {{If(keyIndices.Count > 0, $"if ({anyChangedCondition}) __store.Touch();")}}
                                 return true;
                             }

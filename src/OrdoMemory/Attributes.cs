@@ -25,6 +25,11 @@ namespace OrdoMemory
     }
 
     [AttributeUsage(AttributeTargets.Field, Inherited = false)]
+    public sealed class PrimaryKeyAttribute : Attribute
+    {
+    }
+
+    [AttributeUsage(AttributeTargets.Field, Inherited = false)]
     public sealed class SecondaryKeyAttribute : Attribute
     {
         public SecondaryKeyAttribute(IndexKind kind = IndexKind.Ordered)

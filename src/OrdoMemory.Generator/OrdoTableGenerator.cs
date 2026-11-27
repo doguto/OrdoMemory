@@ -13,6 +13,7 @@ namespace OrdoMemory.Generator
     public sealed class OrdoTableGenerator : ISourceGenerator
     {
         const string TableAttributeName = "OrdoMemory.OrdoTableAttribute";
+        const string PrimaryKeyAttributeName = "OrdoMemory.PrimaryKeyAttribute";
         const string KeyAttributeName = "OrdoMemory.SecondaryKeyAttribute";
 
         public void Initialize(GeneratorInitializationContext context)
@@ -26,8 +27,9 @@ namespace OrdoMemory.Generator
 
             var compilation = context.Compilation;
             var tableAttributeType = compilation.GetTypeByMetadataName(TableAttributeName);
+            var primaryKeyAttributeType = compilation.GetTypeByMetadataName(PrimaryKeyAttributeName);
             var keyAttributeType = compilation.GetTypeByMetadataName(KeyAttributeName);
-            if (tableAttributeType == null || keyAttributeType == null) return;
+            if (tableAttributeType == null || primaryKeyAttributeType == null || keyAttributeType == null) return;
 
             var done = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
             foreach (var declaration in receiver.Candidates)
@@ -38,7 +40,7 @@ namespace OrdoMemory.Generator
                 var tableAttribute = type.GetAttributes().FirstOrDefault(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, tableAttributeType));
                 if (tableAttribute == null || !done.Add(type)) continue;
 
-                var model = TableModel.Create(type, tableAttribute, keyAttributeType, context);
+                var model = TableModel.Create(type, tableAttribute, primaryKeyAttributeType, keyAttributeType, context);
                 if (model == null) continue;
 
                 var hint = type.ToDisplayString().Replace('.', '_') + ".OrdoTable.g.cs";

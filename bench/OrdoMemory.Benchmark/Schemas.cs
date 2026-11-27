@@ -8,6 +8,8 @@ namespace OrdoMemory.Benchmark
     [OrdoTable]
     public readonly partial struct OrdoItem
     {
+        [PrimaryKey] public readonly uint Id;
+
         [SecondaryKey] public readonly int Code;
 
         [SecondaryKey(Unique = false)] public readonly int Category;
@@ -22,7 +24,7 @@ namespace OrdoMemory.Benchmark
     [MemoryTable("item"), MessagePackObject(true)]
     public sealed class MmItem
     {
-        [PrimaryKey]
+        [MasterMemory.PrimaryKey]
         public int Id { get; set; }
 
         [MasterMemory.SecondaryKey(0)]

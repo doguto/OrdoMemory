@@ -40,5 +40,20 @@ namespace OrdoMemory.Generator
             "OM007", "OrdoTable has no fields",
             "'{0}' must have at least one instance field",
             Category, DiagnosticSeverity.Error, true);
+
+        public static readonly DiagnosticDescriptor PrimaryKeyCount = new(
+            "OM008", "OrdoTable must have exactly one PrimaryKey",
+            "'{0}' must have exactly one field marked with [PrimaryKey]",
+            Category, DiagnosticSeverity.Error, true);
+
+        public static readonly DiagnosticDescriptor PrimaryKeyType = new(
+            "OM009", "Invalid PrimaryKey type",
+            "PrimaryKey '{0}' must be of type '{1}'",
+            Category, DiagnosticSeverity.Error, true);
+
+        public static readonly DiagnosticDescriptor PrimaryKeyIsSecondaryKey = new(
+            "OM010", "PrimaryKey cannot be a SecondaryKey",
+            "PrimaryKey '{0}' cannot also be marked with [SecondaryKey]",
+            Category, DiagnosticSeverity.Error, true);
     }
 }

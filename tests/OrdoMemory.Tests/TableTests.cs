@@ -35,6 +35,45 @@ namespace OrdoMemory.Tests
         }
 
         [Fact]
+        public void RowHoldsPrimaryKey()
+        {
+            var table = new ItemTable();
+            Assert.True(table.TryInsert(NewItem(1), out var first));
+            Assert.True(table.TryInsert(NewItem(2), out var second));
+            Assert.True(table.TryFind(first, out var row));
+            Assert.Equal(first, row.Id);
+
+            Assert.True(table.TryFindByCode(2, out row));
+            Assert.Equal(second, row.Id);
+
+            Assert.True(table.Update(first, name: "renamed", code: 10));
+            Assert.True(table.TryFind(first, out row));
+            Assert.Equal(first, row.Id);
+            Assert.Equal("renamed", row.Name);
+
+            table.Remove(first);
+            Assert.True(table.TryFind(second, out row));
+            Assert.Equal(second, row.Id);
+
+            foreach (ref readonly var r in table.All()) Assert.Equal(second, r.Id);
+        }
+
+        [Fact]
+        public void BulkInsertedRowsHoldPrimaryKey()
+        {
+            var table = new ItemTable();
+            var rows = Enumerable.Range(0, 10).Select(i => NewItem(i)).ToArray();
+            var primaryKeys = new uint[rows.Length];
+            Assert.True(table.TryBulkInsert(rows, primaryKeys));
+
+            for (var i = 0; i < rows.Length; i++)
+            {
+                Assert.True(table.TryFind(primaryKeys[i], out var row));
+                Assert.Equal(primaryKeys[i], row.Id);
+            }
+        }
+
+        [Fact]
         public void ReusedSlotGetsNewGeneration()
         {
             var table = new ItemTable();
@@ -293,6 +332,7 @@ namespace OrdoMemory.Tests
             Assert.True(table.Update(a, primaryKeyValue: 10));
             Assert.True(table.TryFind(a, out var row));
             Assert.Equal(10, row.PrimaryKey);
+            Assert.Equal(a, row.Id);
         }
 
         [Fact]

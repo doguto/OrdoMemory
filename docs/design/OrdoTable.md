@@ -54,7 +54,7 @@ int freeHead;
 ```
 
 - `Slot` は 1 つの struct にまとめ、Find で触るキャッシュラインを 1 本にする.
-- Record (Row) は PK を持たない. PK が必要な場合は、列挙子の `CurrentPrimaryKey` か `denseToSlot` と `slots` から求める.
+- Record (Row) は自身の PK を持つ. 検索や列挙で得た Record から、他のテーブルや外部のオブジェクトが参照するための PK を直接取り出せるようにするため.
 
 ### Record
 
@@ -63,6 +63,10 @@ int freeHead;
   - 値で受け取るため、同じインスタンスを二重に Insert するという問題が起こり得ない.
 - メンバには `readonly` を付ける. `ref readonly` / `in` で受け取ったときの隠れたコピー (defensive copy) を防ぐため.
 - 書き換えは Update 経由のみとする. 索引との食い違いを防ぐため.
+- `[PrimaryKey]` を付けたフィールドを必ず 1 つ持つ. 型は PK の型 (`uint` / `ulong`) と一致させる.
+  - フィールドは利用者が宣言する. 生成コードで追加すると partial struct のフィールドが複数の宣言に分かれ、並び順が定義されなくなるため (CS0282).
+  - PK は Insert で払い出されるまで決まらない. 生成するコンストラクタは PK を引数に取らず、Insert / BulkInsert で払い出した PK を差し込んだコピーを格納する. Insert 時に渡された値は無視する.
+  - Update の引数に PK は含めない.
 - 生成時にフィールドをサイズの降順に並べ、パディングを減らす.
 
 ---
@@ -297,7 +301,7 @@ public sealed class SampleTable
 
 | 項目 | 1 件あたり |
 |---|---|
-| Row | Record の大きさ (SampleRow なら 16B, ベンチマークの Row なら 32B) |
+| Row | Record の大きさ (SampleRow なら 16B, ベンチマークの Row なら 32B). PK のフィールド (4B / 8B) を含む |
 | `denseToSlot` | 4B |
 | `slots` | 8B |
 | **合計** | **Row + 12B** + 配列の余り |

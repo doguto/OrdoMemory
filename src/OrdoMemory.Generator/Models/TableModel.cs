@@ -16,6 +16,7 @@ namespace OrdoMemory.Generator.Models
             string accessibility,
             bool usesUInt64PrimaryKey,
             int slotBits,
+            string primaryKeyField,
             IReadOnlyList<FieldModel> fields,
             IReadOnlyList<KeyModel> keys,
             bool generateConstructor
@@ -29,6 +30,7 @@ namespace OrdoMemory.Generator.Models
             PrimaryKeyType = PrimaryKeyTypeOf(usesUInt64PrimaryKey);
             PrimaryKeyTraits = usesUInt64PrimaryKey ? "global::OrdoMemory.UInt64PrimaryKey" : "global::OrdoMemory.UInt32PrimaryKey";
             SlotBits = slotBits;
+            PrimaryKeyField = primaryKeyField;
             Fields = fields;
             Keys = keys;
             GenerateConstructor = generateConstructor;
@@ -42,13 +44,14 @@ namespace OrdoMemory.Generator.Models
         public string PrimaryKeyType { get; }
         public string PrimaryKeyTraits { get; }
         public int SlotBits { get; }
+        public string PrimaryKeyField { get; }
         public IReadOnlyList<FieldModel> Fields { get; }
         public IReadOnlyList<KeyModel> Keys { get; }
         public bool GenerateConstructor { get; }
 
         static string PrimaryKeyTypeOf(bool usesUInt64PrimaryKey) => usesUInt64PrimaryKey ? "ulong" : "uint";
 
-        public static TableModel Create(INamedTypeSymbol type, AttributeData tableAttribute, INamedTypeSymbol keyAttributeType, GeneratorExecutionContext context)
+        public static TableModel Create(INamedTypeSymbol type, AttributeData tableAttribute, INamedTypeSymbol primaryKeyAttributeType, INamedTypeSymbol keyAttributeType, GeneratorExecutionContext context)
         {
             var location = type.Locations.FirstOrDefault();
 
@@ -98,6 +101,8 @@ namespace OrdoMemory.Generator.Models
                 isValid = false;
             }
 
+            string primaryKeyField = null;
+            var primaryKeyCount = 0;
             var fields = new List<FieldModel>();
             var keys = new List<KeyModel>();
             foreach (var member in type.GetMembers())
@@ -120,10 +125,32 @@ namespace OrdoMemory.Generator.Models
                     continue;
                 }
 
+                var keyAttribute = field.GetAttributes().FirstOrDefault(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, keyAttributeType));
+
+                if (field.GetAttributes().Any(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, primaryKeyAttributeType)))
+                {
+                    primaryKeyCount++;
+                    primaryKeyField = field.Name;
+
+                    var primaryKeySpecialType = usesUInt64PrimaryKey ? SpecialType.System_UInt64 : SpecialType.System_UInt32;
+                    if (field.Type.SpecialType != primaryKeySpecialType)
+                    {
+                        context.ReportDiagnostic(Diagnostic.Create(Diagnostics.PrimaryKeyType, field.Locations.FirstOrDefault(), field.Name, PrimaryKeyTypeOf(usesUInt64PrimaryKey)));
+                        isValid = false;
+                    }
+
+                    if (keyAttribute != null)
+                    {
+                        context.ReportDiagnostic(Diagnostic.Create(Diagnostics.PrimaryKeyIsSecondaryKey, field.Locations.FirstOrDefault(), field.Name));
+                        isValid = false;
+                    }
+
+                    continue;
+                }
+
                 var fieldModel = new FieldModel(field.Name, field.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
                 fields.Add(fieldModel);
 
-                var keyAttribute = field.GetAttributes().FirstOrDefault(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, keyAttributeType));
                 if (keyAttribute == null) continue;
 
                 var hash = keyAttribute.ConstructorArguments.Length > 0 && keyAttribute.ConstructorArguments[0].Value is int indexKind && indexKind == 1;
@@ -141,6 +168,12 @@ namespace OrdoMemory.Generator.Models
                 }
 
                 keys.Add(new KeyModel(fieldModel, hash, unique, mapping));
+            }
+
+            if (primaryKeyCount != 1)
+            {
+                context.ReportDiagnostic(Diagnostic.Create(Diagnostics.PrimaryKeyCount, location, type.Name));
+                isValid = false;
             }
 
             if (fields.Count == 0 && isValid)
@@ -164,6 +197,7 @@ namespace OrdoMemory.Generator.Models
                 type.DeclaredAccessibility == Microsoft.CodeAnalysis.Accessibility.Public ? "public" : "internal",
                 usesUInt64PrimaryKey,
                 slotBits,
+                primaryKeyField,
                 fields,
                 keys,
                 generateConstructor);

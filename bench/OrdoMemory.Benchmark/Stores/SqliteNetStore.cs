@@ -5,7 +5,7 @@ namespace OrdoMemory.Benchmark.Stores
     [Table("item")]
     public sealed class SnItem
     {
-        [PrimaryKey]
+        [SQLite.PrimaryKey]
         public int Id { get; set; }
 
         [Indexed(Name = "ix_item_code", Unique = true)]
