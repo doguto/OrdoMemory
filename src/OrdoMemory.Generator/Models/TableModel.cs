@@ -19,8 +19,7 @@ namespace OrdoMemory.Generator.Models
             string primaryKeyField,
             IReadOnlyList<FieldModel> fields,
             IReadOnlyList<KeyModel> keys,
-            bool generateConstructor,
-            bool hasMutableField
+            bool generateConstructor
         )
         {
             NamespaceName = namespaceName;
@@ -35,7 +34,6 @@ namespace OrdoMemory.Generator.Models
             Fields = fields;
             Keys = keys;
             GenerateConstructor = generateConstructor;
-            HasMutableField = hasMutableField;
         }
 
         public string NamespaceName { get; }
@@ -50,7 +48,6 @@ namespace OrdoMemory.Generator.Models
         public IReadOnlyList<FieldModel> Fields { get; }
         public IReadOnlyList<KeyModel> Keys { get; }
         public bool GenerateConstructor { get; }
-        public bool HasMutableField { get; }
 
         static string PrimaryKeyTypeOf(bool usesUInt64PrimaryKey) => usesUInt64PrimaryKey ? "ulong" : "uint";
 
@@ -65,7 +62,7 @@ namespace OrdoMemory.Generator.Models
                 return null;
             }
 
-            // partial であることを確認する. readonly struct でなくてもよい (キー以外のフィールドを UpdateRef で書き換えられるようにするため)
+            // partial であることを確認する. readonly struct でなくてもよい (キー以外の readonly でないフィールドは Update でその場で書き換える)
             var isPartial = type.DeclaringSyntaxReferences.All(reference =>
                 reference.GetSyntax() is StructDeclarationSyntax declaration && declaration.Modifiers.Any(SyntaxKind.PartialKeyword)
             );
@@ -109,7 +106,6 @@ namespace OrdoMemory.Generator.Models
 
             string primaryKeyField = null;
             var primaryKeyCount = 0;
-            var hasMutableField = false;
             var fields = new List<FieldModel>();
             var keys = new List<KeyModel>();
             foreach (var member in type.GetMembers())
@@ -143,8 +139,6 @@ namespace OrdoMemory.Generator.Models
                     isValid = false;
                 }
 
-                if (!field.IsReadOnly) hasMutableField = true;
-
                 if (isPrimaryKey)
                 {
                     primaryKeyCount++;
@@ -166,7 +160,7 @@ namespace OrdoMemory.Generator.Models
                     continue;
                 }
 
-                var fieldModel = new FieldModel(field.Name, field.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+                var fieldModel = new FieldModel(field.Name, field.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat), field.IsReadOnly);
                 fields.Add(fieldModel);
 
                 if (keyAttribute == null) continue;
@@ -218,8 +212,7 @@ namespace OrdoMemory.Generator.Models
                 primaryKeyField,
                 fields,
                 keys,
-                generateConstructor,
-                hasMutableField);
+                generateConstructor);
         }
 
         static void ReportNonReadOnlyMembers(INamedTypeSymbol type, GeneratorExecutionContext context)

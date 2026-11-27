@@ -21,7 +21,6 @@ namespace OrdoMemory.Generator.Emitting
                                      public const int SlotBits = {{model.SlotBits}};
                                  
                                      static readonly {{rowType}} __notFound = default;
-                                     {{If(model.HasMutableField, $"static {rowType} __updateSink;")}}
                                  
                                      readonly {{storeType}} __store;
                                      {{Each(model.Keys, key => $"readonly {IndexType(model, key)} {key.IndexField};")}}
@@ -209,17 +208,6 @@ namespace OrdoMemory.Generator.Emitting
             var rowType = model.RowFullName;
             var primaryKeyType = model.PrimaryKeyType;
 
-            // キー以外のフィールドをその場で書き換えるための参照. キーのフィールドは readonly を必須にしているため、
-            // この参照から索引と食い違う書き換えはできない. 見つからない場合は捨て場への参照を返す
-            var updateRef = If(model.HasMutableField, Render($$"""
-                                                              public ref {{rowType}} UpdateRef({{primaryKeyType}} primaryKey, out bool found)
-                                                              {
-                                                                  found = __store.TryGetIndex(primaryKey, out var index);
-                                                                  if (found) return ref __store.GetRowRef(index);
-                                                                  __updateSink = default;
-                                                                  return ref __updateSink;
-                                                              }
-                                                              """));
 
             return Render($$"""
                             public bool Contains({{primaryKeyType}} primaryKey) => __store.TryGetIndex(primaryKey, out _);
@@ -242,8 +230,6 @@ namespace OrdoMemory.Generator.Emitting
                                 if (found) return ref __store.GetRowRef(index);
                                 return ref __notFound;
                             }
-
-                            {{updateRef}}
                             """);
         }
 
@@ -256,20 +242,46 @@ namespace OrdoMemory.Generator.Emitting
             var conflictCondition = string.Join(" || ", uniqueKeyIndices.Select(keyIndex => $"(__changed{keyIndex} && {model.Keys[keyIndex].IndexField}.ContainsKey(__newKey{keyIndex}))"));
             var anyChangedCondition = string.Join(" || ", keyIndices.Select(keyIndex => $"__changed{keyIndex}"));
 
+            var rebuild = Render($$"""
+                                   var __next = new {{model.RowFullName}}({{arguments}});
+                                   {{Each(keyIndices, keyIndex => EmitApplyKeyChange(model, keyIndex))}}
+                                   __current = new {{model.RowFullName}}(primaryKey, in __next);
+                                   {{If(keyIndices.Count > 0, $"if ({anyChangedCondition}) __store.Touch();")}}
+                                   return true;
+                                   """);
+
+            // readonly でないフィールドだけなら、指定されたフィールドをその場で書き換える.
+            // キー (readonly 必須) が変わる場合と、readonly のフィールドが指定された場合は、従来どおり Record 全体を作り直す
+            var mutableFields = model.Fields.Where(field => !field.IsReadOnly).ToList();
+            var body = rebuild;
+            if (mutableFields.Count > 0)
+            {
+                var rebuildConditions = keyIndices.Select(keyIndex => $"__changed{keyIndex}")
+                                                  .Concat(model.Fields.Where(field => field.IsReadOnly && !model.Keys.Any(key => key.Field == field)).Select(field => $"{field.ParameterName}.HasValue"))
+                                                  .ToList();
+                body = Render($$"""
+                                {{If(rebuildConditions.Count > 0, Render($$"""
+                                                                           if ({{string.Join(" || ", rebuildConditions)}})
+                                                                           {
+                                                                               {{rebuild}}
+                                                                           }
+                                                                           """))}}
+
+                                {{Each(mutableFields, field => $"if ({field.ParameterName}.HasValue) __current.{field.Name} = {field.ParameterName}.Value;")}}
+                                return true;
+                                """);
+            }
+
             return Render($$"""
                             public bool Update({{model.PrimaryKeyType}} primaryKey, {{parameters}})
                             {
                                 if (!__store.TryGetIndex(primaryKey, out var __index)) return false;
                             
                                 ref var __current = ref __store.GetRowRef(__index);
-                                var __next = new {{model.RowFullName}}({{arguments}});
                                 {{Each(keyIndices, keyIndex => EmitDetectKeyChange(model, keyIndex))}}
                                 {{If(uniqueKeyIndices.Count > 0, $"if ({conflictCondition}) return false;")}}
-                                {{Each(keyIndices, keyIndex => EmitApplyKeyChange(model, keyIndex))}}
                             
-                                __current = new {{model.RowFullName}}(primaryKey, in __next);
-                                {{If(keyIndices.Count > 0, $"if ({anyChangedCondition}) __store.Touch();")}}
-                                return true;
+                                {{body}}
                             }
                             """);
         }
@@ -279,7 +291,7 @@ namespace OrdoMemory.Generator.Emitting
             var key = model.Keys[keyIndex];
             return Render($$"""
                             var __oldKey{{keyIndex}} = {{ConvertKey(key, "__current." + key.Field.Name)}};
-                            var __newKey{{keyIndex}} = {{ConvertKey(key, "__next." + key.Field.Name)}};
+                            var __newKey{{keyIndex}} = {{ConvertKey(key, $"{key.Field.ParameterName}.OrElse(__current.{key.Field.Name})")}};
                             var __changed{{keyIndex}} = !global::System.Collections.Generic.EqualityComparer<{{key.KeyType}}>.Default.Equals(__oldKey{{keyIndex}}, __newKey{{keyIndex}});
                             """);
         }

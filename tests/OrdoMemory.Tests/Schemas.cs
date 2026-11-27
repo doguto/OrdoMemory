@@ -52,7 +52,7 @@ namespace OrdoMemory.Tests
         [SecondaryKey] public readonly int Value;
     }
 
-    // readonly struct ではなく、キー以外のフィールドを UpdateRef で書き換えられる
+    // readonly struct ではなく、キー以外のフィールドは Update でその場で書き換えられる
     [OrdoTable]
     public partial struct Character
     {
