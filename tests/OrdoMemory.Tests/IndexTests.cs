@@ -287,6 +287,42 @@ namespace OrdoMemory.Tests
             RunRandom<string, StringKey, uint, UInt32PrimaryKey>(true, RandomString, StringComparer.Ordinal, seed);
         }
 
+        // 先頭 1 文字のみを正規化値とし、残りはフル比較に委ねるキー
+        // (NormalizedBits + PK ビット数 <= 64 でも PK を詰めてはいけないケース)
+        readonly struct ShortPrefixStringKey : IOrderedKeyTraits<string>
+        {
+            public int NormalizedBits => 16;
+            public bool NeedsFullComparison => true;
+
+            public ulong Normalize(string key)
+            {
+                return string.IsNullOrEmpty(key) ? 0UL : key[0];
+            }
+
+            public int CompareFull(string a, string b)
+            {
+                return string.CompareOrdinal(a, b);
+            }
+        }
+
+        [Theory]
+        [InlineData(11)]
+        [InlineData(12)]
+        public void ShortPrefixStringNonUnique(int seed)
+        {
+            RunRandom<string, ShortPrefixStringKey, uint, UInt32PrimaryKey>(false, RandomString, StringComparer.Ordinal, seed);
+        }
+
+        [Fact]
+        public void ShortPrefixStringRangeOrder()
+        {
+            var index = new OrderedIndex<string, ShortPrefixStringKey, uint, UInt32PrimaryKey>(false, 4);
+            Assert.True(index.Insert("ab", 1));
+            Assert.True(index.Insert("aa", 2));
+            Assert.Equal(new ulong[] { 2 }, Collect(index.Equal("aa")));
+            Assert.Equal(new ulong[] { 2, 1 }, Collect(index.Range("a", "b")));
+        }
+
         [Theory]
         [InlineData(10)]
         public void DoubleNonUnique(int seed)
