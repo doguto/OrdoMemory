@@ -8,6 +8,17 @@ namespace OrdoMemory.Generator.Models
 {
     sealed class TableModel
     {
+        // uint の PK の既定の配分: スロット 22 bit + 世代 10 bit.
+        // 同時に持てる件数 (2^22 = 約 419 万) と、同じスロットを再利用できる回数 (2^10 - 1 = 1023 回) の釣り合いを取った値.
+        const int DefaultUInt32SlotBits = 22;
+
+        // ulong の PK の既定の配分: スロット 32 bit + 世代 32 bit.
+        // 件数は配列の長さ (int) で頭打ちになるためスロットは 32 bit あれば足り、残りをすべて世代に回す (約 43 億回).
+        const int DefaultUInt64SlotBits = 32;
+
+        // ulong の PK で世代を 32 bit より広くしても、RowStore が世代を uint で持つため使い切れない
+        const int MinimumUInt64SlotBits = 32;
+
         public TableModel(
             string namespaceName,
             string rowName,
@@ -77,7 +88,11 @@ namespace OrdoMemory.Generator.Models
 
             var isValid = true;
             var tableName = type.Name + "Table";
-            var usesUInt64PrimaryKey = false;
+            // PK の型は [PrimaryKey] を付けたフィールドの型 (uint / ulong) から決める
+            var usesUInt64PrimaryKey = type.GetMembers().OfType<IFieldSymbol>().Any(field =>
+                !field.IsStatic &&
+                field.Type.SpecialType == SpecialType.System_UInt64 &&
+                field.GetAttributes().Any(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, primaryKeyAttributeType)));
             var slotBits = 0;
             foreach (var argument in tableAttribute.NamedArguments)
             {
@@ -86,18 +101,15 @@ namespace OrdoMemory.Generator.Models
                     case "TableName":
                         if (argument.Value.Value is string name && name.Length > 0) tableName = name;
                         break;
-                    case "PrimaryKey":
-                        usesUInt64PrimaryKey = argument.Value.Value is int primaryKeyKind && primaryKeyKind == 1;
-                        break;
                     case "SlotBits":
                         slotBits = argument.Value.Value is int bits ? bits : 0;
                         break;
                 }
             }
 
-            var minimumSlotBits = usesUInt64PrimaryKey ? 32 : 1;
+            var minimumSlotBits = usesUInt64PrimaryKey ? MinimumUInt64SlotBits : 1;
             var maximumSlotBits = usesUInt64PrimaryKey ? 63 : 31;
-            if (slotBits == 0) slotBits = usesUInt64PrimaryKey ? 32 : 22;
+            if (slotBits == 0) slotBits = usesUInt64PrimaryKey ? DefaultUInt64SlotBits : DefaultUInt32SlotBits;
             if (slotBits < minimumSlotBits || slotBits > maximumSlotBits)
             {
                 context.ReportDiagnostic(Diagnostic.Create(Diagnostics.InvalidSlotBits, location, slotBits, PrimaryKeyTypeOf(usesUInt64PrimaryKey), $"{minimumSlotBits}..{maximumSlotBits}"));
@@ -146,10 +158,9 @@ namespace OrdoMemory.Generator.Models
                     primaryKeyCount++;
                     primaryKeyField = field.Name;
 
-                    var primaryKeySpecialType = usesUInt64PrimaryKey ? SpecialType.System_UInt64 : SpecialType.System_UInt32;
-                    if (field.Type.SpecialType != primaryKeySpecialType)
+                    if (field.Type.SpecialType != SpecialType.System_UInt32 && field.Type.SpecialType != SpecialType.System_UInt64)
                     {
-                        context.ReportDiagnostic(Diagnostic.Create(Diagnostics.PrimaryKeyType, field.Locations.FirstOrDefault(), field.Name, PrimaryKeyTypeOf(usesUInt64PrimaryKey)));
+                        context.ReportDiagnostic(Diagnostic.Create(Diagnostics.PrimaryKeyType, field.Locations.FirstOrDefault(), field.Name));
                         isValid = false;
                     }
 

@@ -26,7 +26,7 @@ namespace OrdoMemory.Tests
         public readonly string Description;
     }
 
-    [OrdoTable(PrimaryKey = PrimaryKeyKind.UInt64, TableName = "BigTable")]
+    [OrdoTable(TableName = "BigTable")]
     public readonly partial struct BigRow
     {
         [PrimaryKey] public readonly ulong Id;
