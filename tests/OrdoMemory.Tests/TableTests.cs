@@ -463,5 +463,19 @@ namespace OrdoMemory.Tests
             Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
             Assert.NotEqual(0, sum);
         }
+
+        [Fact]
+        public void HintNamesDoNotCollide()
+        {
+            var a = new HintName.A_BTable();
+            var b = new HintName_A.BTable();
+            var upper = new HintName.CaseRowTable();
+            var lower = new HintName.caseRowTable();
+            Assert.True(a.TryInsert(new HintName.A_B(1), out _));
+            Assert.True(b.TryInsert(new HintName_A.B(2), out _));
+            Assert.True(upper.TryInsert(new HintName.CaseRow(3), out _));
+            Assert.True(lower.TryInsert(new HintName.caseRow(4), out _));
+            Assert.Equal(1, a.Count + b.Count - upper.Count - lower.Count + 1);
+        }
     }
 }
