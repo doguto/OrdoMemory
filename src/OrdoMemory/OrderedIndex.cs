@@ -55,7 +55,9 @@ namespace OrdoMemory
             this.unique = unique;
             pkBits = default(TPrimaryKeyTraits).Bits;
             pkMask = pkBits == 64 ? ulong.MaxValue : (1UL << pkBits) - 1;
-            packsPk = !unique && default(TKeyTraits).NormalizedBits + pkBits <= 64;
+            // 正規化値が順序を確定しないキー (NeedsFullComparison) では、PK を下位ビットに詰めると
+            // 正規化値の比較だけで (prefix, PK) 順に並んでしまい、フルキー順にならないため詰めない
+            packsPk = !unique && !NeedsFullComparison && default(TKeyTraits).NormalizedBits + pkBits <= 64;
             comparesPk = !unique && !packsPk;
             Reset(4, 4);
         }
