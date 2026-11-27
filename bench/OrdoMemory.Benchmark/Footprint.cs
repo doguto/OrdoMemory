@@ -4,11 +4,6 @@ using System.Text;
 
 namespace OrdoMemory.Benchmark
 {
-    /// <summary>
-    /// 一括挿入後に保持しているメモリ. BenchmarkDotNet は確保量しか測れないため別に測る.
-    /// managed: GC ヒープの増分. ロード後にデータセットへの参照を捨て、ストアが保持する文字列も含める.
-    /// native: SQLite のメモリ使用量 (sqlite3_memory_used) の増分. ファイル版はページキャッシュのみで、ディスク上のデータは含まない.
-    /// </summary>
     public static class Footprint
     {
         public static void Run(string outputPath)
@@ -19,17 +14,17 @@ namespace OrdoMemory.Benchmark
             sb.AppendLine("|---|---:|---:|---:|---:|");
 
             foreach (var n in BenchEnv.Sizes())
+            foreach (var target in BenchEnv.Targets())
             {
-                foreach (var target in BenchEnv.Targets())
+                using (var warm = StoreFactory.Create(target))
                 {
-                    // ネイティブライブラリの読み込みなど、初回だけの確保を除く.
-                    using (var warm = StoreFactory.Create(target)) warm.Insert(Dataset.Create(1, 1)[0]);
-
-                    var (managed, native) = Measure(target, n);
-                    var line = $"| {target} | {n:N0} | {managed / (double)n:F1} | {native / (double)n:F1} | {(managed + native) / (double)n:F1} |";
-                    Console.WriteLine(line);
-                    sb.AppendLine(line);
+                    warm.Insert(Dataset.Create(1, 1)[0]);
                 }
+
+                var (managed, native) = Measure(target, n);
+                var line = $"| {target} | {n:N0} | {managed / (double)n:F1} | {native / (double)n:F1} | {(managed + native) / (double)n:F1} |";
+                Console.WriteLine(line);
+                sb.AppendLine(line);
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath)));
@@ -55,7 +50,6 @@ namespace OrdoMemory.Benchmark
             return (managed1 - managed0, native1 - native0);
         }
 
-        // データセットと PK の配列をこのメソッドの中で捨てる.
         static void Load(IStore store, int n)
         {
             store.BulkLoad(Dataset.Create(n, 20261120), new long[n]);

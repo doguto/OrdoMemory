@@ -5,20 +5,13 @@ using System.Runtime.CompilerServices;
 
 namespace OrdoMemory
 {
-    /// <summary>
-    /// 配列アリーナ上の B+Tree.
-    /// ノードはオブジェクトにせず、葉と内部ノードをそれぞれ数本の配列に置いて int の番号で指す.
-    /// 非 Unique の索引のキーは (SecondaryKey, PK) の組. 正規化キーと PK が 64bit に収まる場合は 1 つの ulong に詰める.
-    /// 内部ノードの各エントリは (子の最小キー, 子). 削除は空になったノードだけを解放する (free-at-empty).
-    /// </summary>
-    public sealed class OrderedIndex<TKey, TKeyTraits, TPk, TPkTraits>
+    public sealed class OrderedIndex<TKey, TKeyTraits, TPrimaryKey, TPrimaryKeyTraits>
         where TKeyTraits : struct, IOrderedKeyTraits<TKey>
-        where TPk : unmanaged
-        where TPkTraits : struct, IPkTraits<TPk>
+        where TPrimaryKey : unmanaged
+        where TPrimaryKeyTraits : struct, IPrimaryKeyTraits<TPrimaryKey>
     {
         public const int DefaultNodeSize = 64;
 
-        // 一括挿入で、件数が既存のこの割合未満なら 1 件ずつ挿入する.
         const int RebuildRatio = 16;
 
         readonly int b;
@@ -28,27 +21,25 @@ namespace OrdoMemory
         readonly int pkBits;
         readonly ulong pkMask;
 
-        // 葉: スロット [leaf * b, leaf * b + b)
         ulong[] lNorm;
-        TKey[] lFull;   // NeedsFull のときのみ
-        TPk[] lPk;      // !packsPk のときのみ
+        TKey[] lFull;
+        TPrimaryKey[] lPk;
         int[] lCount;
         int[] lNext;
         int[] lPrev;
         int leafUsed;
         int leafFree;
 
-        // 内部ノード
         ulong[] iNorm;
-        TKey[] iFull;   // NeedsFull のときのみ
-        ulong[] iPk;    // comparesPk のときのみ
+        TKey[] iFull;
+        ulong[] iPk;
         int[] iChild;
         int[] iCount;
         int innerUsed;
         int innerFree;
 
         int root;
-        int height;     // 0: 根が葉
+        int height;
         int count;
 
         int[] pathNode = new int[16];
@@ -62,9 +53,9 @@ namespace OrdoMemory
 
             b = nodeSize;
             this.unique = unique;
-            pkBits = default(TPkTraits).Bits;
+            pkBits = default(TPrimaryKeyTraits).Bits;
             pkMask = pkBits == 64 ? ulong.MaxValue : (1UL << pkBits) - 1;
-            packsPk = !unique && default(TKeyTraits).NormBits + pkBits <= 64;
+            packsPk = !unique && default(TKeyTraits).NormalizedBits + pkBits <= 64;
             comparesPk = !unique && !packsPk;
             Reset(4, 4);
         }
@@ -73,16 +64,17 @@ namespace OrdoMemory
 
         public bool IsUnique => unique;
 
-        static bool NeedsFull
+        static bool NeedsFullComparison
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => default(TKeyTraits).NeedsFull;
+            get => default(TKeyTraits).NeedsFullComparison;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        static ulong ToU(TPk pk) => default(TPkTraits).ToUInt64(pk);
-
-        // ---- 比較 ----
+        static ulong ToU(TPrimaryKey primaryKey)
+        {
+            return default(TPrimaryKeyTraits).ToUInt64(primaryKey);
+        }
 
         readonly struct Probe
         {
@@ -90,61 +82,60 @@ namespace OrdoMemory
             public readonly TKey Key;
             public readonly ulong Pk;
 
-            public Probe(ulong norm, TKey key, ulong pk)
+            public Probe(ulong norm, TKey key, ulong primaryKey)
             {
                 Norm = norm;
                 Key = key;
-                Pk = pk;
+                Pk = primaryKey;
             }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        Probe MakeProbe(TKey key, ulong pk)
+        Probe MakeProbe(TKey key, ulong primaryKey)
         {
             var norm = default(TKeyTraits).Normalize(key);
-            if (packsPk) norm = (norm << pkBits) | pk;
-            return new Probe(norm, key, pk);
+            if (packsPk) norm = (norm << pkBits) | primaryKey;
+            return new Probe(norm, key, primaryKey);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        int Compare(ulong norm, TKey full, ulong pk, in Probe probe)
+        int Compare(ulong norm, TKey full, ulong primaryKey, in Probe probe)
         {
             if (norm != probe.Norm) return norm < probe.Norm ? -1 : 1;
-            if (NeedsFull)
+            if (NeedsFullComparison)
             {
                 var c = default(TKeyTraits).CompareFull(full, probe.Key);
                 if (c != 0) return c;
             }
 
             if (!comparesPk) return 0;
-            return pk == probe.Pk ? 0 : (pk < probe.Pk ? -1 : 1);
+            return primaryKey == probe.Pk ? 0 : primaryKey < probe.Pk ? -1 : 1;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         int CompareLeaf(int slot, in Probe probe)
         {
-            return Compare(lNorm[slot], NeedsFull ? lFull[slot] : default, comparesPk ? ToU(lPk[slot]) : 0, probe);
+            return Compare(lNorm[slot], NeedsFullComparison ? lFull[slot] : default, comparesPk ? ToU(lPk[slot]) : 0, probe);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         int CompareInner(int slot, in Probe probe)
         {
-            return Compare(iNorm[slot], NeedsFull ? iFull[slot] : default, comparesPk ? iPk[slot] : 0, probe);
+            return Compare(iNorm[slot], NeedsFullComparison ? iFull[slot] : default, comparesPk ? iPk[slot] : 0, probe);
         }
 
-        // PK を除いた SecondaryKey だけの比較.
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         int CompareKey(int slot, ulong keyNorm, TKey key)
         {
             var n = packsPk ? lNorm[slot] >> pkBits : lNorm[slot];
             if (n != keyNorm) return n < keyNorm ? -1 : 1;
-            return NeedsFull ? default(TKeyTraits).CompareFull(lFull[slot], key) : 0;
+            return NeedsFullComparison ? default(TKeyTraits).CompareFull(lFull[slot], key) : 0;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        TPk PkAtSlot(int slot)
+        TPrimaryKey PkAtSlot(int slot)
         {
-            return packsPk ? default(TPkTraits).FromUInt64(lNorm[slot] & pkMask) : lPk[slot];
+            return packsPk ? default(TPrimaryKeyTraits).FromUInt64(lNorm[slot] & pkMask) : lPk[slot];
         }
 
         int LeafLowerBound(int leaf, in Probe probe)
@@ -155,14 +146,19 @@ namespace OrdoMemory
             while (lo < hi)
             {
                 var mid = (lo + hi) >> 1;
-                if (CompareLeaf(baseSlot + mid, probe) < 0) lo = mid + 1;
-                else hi = mid;
+                if (CompareLeaf(baseSlot + mid, probe) < 0)
+                {
+                    lo = mid + 1;
+                }
+                else
+                {
+                    hi = mid;
+                }
             }
 
             return lo;
         }
 
-        // 最小キー <= probe となる最後の子の位置. 先頭の子は下限なしとして扱う.
         int ChildIndex(int node, in Probe probe)
         {
             var lo = 0;
@@ -171,8 +167,14 @@ namespace OrdoMemory
             while (lo < hi)
             {
                 var mid = (lo + hi) >> 1;
-                if (CompareInner(baseSlot + mid, probe) <= 0) lo = mid + 1;
-                else hi = mid;
+                if (CompareInner(baseSlot + mid, probe) <= 0)
+                {
+                    lo = mid + 1;
+                }
+                else
+                {
+                    hi = mid;
+                }
             }
 
             return lo == 0 ? 0 : lo - 1;
@@ -192,24 +194,21 @@ namespace OrdoMemory
             return node;
         }
 
-        // ---- 検索 ----
-
         public bool ContainsKey(TKey key)
         {
             return TryGetFirst(key, out _);
         }
 
-        // SecondaryKey が等しいものの中では PK の昇順で先頭.
-        public bool TryGetFirst(TKey key, out TPk pk)
+        public bool TryGetFirst(TKey key, out TPrimaryKey primaryKey)
         {
             var e = Range(key, key);
             if (e.MoveNext())
             {
-                pk = e.Current;
+                primaryKey = e.Current;
                 return true;
             }
 
-            pk = default;
+            primaryKey = default;
             return false;
         }
 
@@ -218,13 +217,12 @@ namespace OrdoMemory
             return Range(key, key);
         }
 
-        // min 以上 max 以下を (SecondaryKey, PK) の昇順で返す.
         public RangeEnumerator Range(TKey min, TKey max)
         {
             var traits = default(TKeyTraits);
             var minNorm = traits.Normalize(min);
             var maxNorm = traits.Normalize(max);
-            if (count == 0 || minNorm > maxNorm || (minNorm == maxNorm && NeedsFull && traits.CompareFull(min, max) > 0))
+            if (count == 0 || minNorm > maxNorm || (minNorm == maxNorm && NeedsFullComparison && traits.CompareFull(min, max) > 0))
             {
                 return new RangeEnumerator(this, -1, 0, maxNorm, max);
             }
@@ -235,16 +233,16 @@ namespace OrdoMemory
             return new RangeEnumerator(this, leaf, pos, maxNorm, max);
         }
 
-        public struct RangeEnumerator : IPkEnumerator<TPk>
+        public struct RangeEnumerator : IPrimaryKeyEnumerator<TPrimaryKey>
         {
-            readonly OrderedIndex<TKey, TKeyTraits, TPk, TPkTraits> index;
+            readonly OrderedIndex<TKey, TKeyTraits, TPrimaryKey, TPrimaryKeyTraits> index;
             readonly ulong maxNorm;
             readonly TKey max;
             int leaf;
             int pos;
-            TPk current;
+            TPrimaryKey current;
 
-            internal RangeEnumerator(OrderedIndex<TKey, TKeyTraits, TPk, TPkTraits> index, int leaf, int pos, ulong maxNorm, TKey max)
+            internal RangeEnumerator(OrderedIndex<TKey, TKeyTraits, TPrimaryKey, TPrimaryKeyTraits> index, int leaf, int pos, ulong maxNorm, TKey max)
             {
                 this.index = index;
                 this.leaf = leaf;
@@ -254,7 +252,7 @@ namespace OrdoMemory
                 current = default;
             }
 
-            public TPk Current => current;
+            public TPrimaryKey Current => current;
 
             public bool MoveNext()
             {
@@ -287,12 +285,9 @@ namespace OrdoMemory
             }
         }
 
-        // ---- 挿入 ----
-
-        // 既に同じエントリ (Unique では同じ SecondaryKey) がある場合は何もせず false を返す.
-        public bool Insert(TKey key, TPk pk)
+        public bool Insert(TKey key, TPrimaryKey primaryKey)
         {
-            var probe = MakeProbe(key, ToU(pk));
+            var probe = MakeProbe(key, ToU(primaryKey));
             var leaf = Descend(probe);
             var pos = LeafLowerBound(leaf, probe);
             if (pos < lCount[leaf] && CompareLeaf(leaf * b + pos, probe) == 0) return false;
@@ -300,11 +295,10 @@ namespace OrdoMemory
             count++;
             if (lCount[leaf] < b)
             {
-                LeafInsertAt(leaf, pos, probe.Norm, key, pk);
+                LeafInsertAt(leaf, pos, probe.Norm, key, primaryKey);
                 return true;
             }
 
-            // 右端の葉の末尾への追記は、新しい葉に新エントリだけを置く (単調増加の挿入で葉を満杯に保つ).
             var split = pos == b && lNext[leaf] < 0 ? b : b / 2;
             var right = AllocLeaf();
             MoveLeafEntries(leaf, split, right, b - split);
@@ -317,15 +311,21 @@ namespace OrdoMemory
             if (next >= 0) lPrev[next] = right;
             lNext[leaf] = right;
 
-            if (pos < split) LeafInsertAt(leaf, pos, probe.Norm, key, pk);
-            else LeafInsertAt(right, pos - split, probe.Norm, key, pk);
+            if (pos < split)
+            {
+                LeafInsertAt(leaf, pos, probe.Norm, key, primaryKey);
+            }
+            else
+            {
+                LeafInsertAt(right, pos - split, probe.Norm, key, primaryKey);
+            }
 
             var rs = right * b;
-            PromoteSplit(1, lNorm[rs], NeedsFull ? lFull[rs] : default, comparesPk ? ToU(lPk[rs]) : 0, right, leaf);
+            PromoteSplit(1, lNorm[rs], NeedsFullComparison ? lFull[rs] : default, comparesPk ? ToU(lPk[rs]) : 0, right, leaf);
             return true;
         }
 
-        void LeafInsertAt(int leaf, int pos, ulong norm, TKey key, TPk pk)
+        void LeafInsertAt(int leaf, int pos, ulong norm, TKey key, TPrimaryKey primaryKey)
         {
             var baseSlot = leaf * b;
             var n = lCount[leaf];
@@ -333,13 +333,13 @@ namespace OrdoMemory
             if (move > 0)
             {
                 Array.Copy(lNorm, baseSlot + pos, lNorm, baseSlot + pos + 1, move);
-                if (NeedsFull) Array.Copy(lFull, baseSlot + pos, lFull, baseSlot + pos + 1, move);
+                if (NeedsFullComparison) Array.Copy(lFull, baseSlot + pos, lFull, baseSlot + pos + 1, move);
                 if (!packsPk) Array.Copy(lPk, baseSlot + pos, lPk, baseSlot + pos + 1, move);
             }
 
             lNorm[baseSlot + pos] = norm;
-            if (NeedsFull) lFull[baseSlot + pos] = key;
-            if (!packsPk) lPk[baseSlot + pos] = pk;
+            if (NeedsFullComparison) lFull[baseSlot + pos] = key;
+            if (!packsPk) lPk[baseSlot + pos] = primaryKey;
             lCount[leaf] = n + 1;
         }
 
@@ -349,7 +349,7 @@ namespace OrdoMemory
             var src = from * b + fromPos;
             var dst = to * b;
             Array.Copy(lNorm, src, lNorm, dst, n);
-            if (NeedsFull)
+            if (NeedsFullComparison)
             {
                 Array.Copy(lFull, src, lFull, dst, n);
                 Array.Clear(lFull, src, n);
@@ -358,7 +358,6 @@ namespace OrdoMemory
             if (!packsPk) Array.Copy(lPk, src, lPk, dst, n);
         }
 
-        // level の親に (sep, child) を追加する. leftChild は分割前のノード (根の分割で使う).
         void PromoteSplit(int level, ulong sepNorm, TKey sepFull, ulong sepPk, int child, int leftChild)
         {
             while (true)
@@ -392,7 +391,7 @@ namespace OrdoMemory
                 if (n > 0)
                 {
                     Array.Copy(iNorm, src, iNorm, dst, n);
-                    if (NeedsFull)
+                    if (NeedsFullComparison)
                     {
                         Array.Copy(iFull, src, iFull, dst, n);
                         Array.Clear(iFull, src, n);
@@ -404,12 +403,18 @@ namespace OrdoMemory
 
                 iCount[node] = split;
                 iCount[right] = n;
-                if (pos <= split && split != b) InnerInsertAt(node, pos, sepNorm, sepFull, sepPk, child);
-                else InnerInsertAt(right, pos - split, sepNorm, sepFull, sepPk, child);
+                if (pos <= split && split != b)
+                {
+                    InnerInsertAt(node, pos, sepNorm, sepFull, sepPk, child);
+                }
+                else
+                {
+                    InnerInsertAt(right, pos - split, sepNorm, sepFull, sepPk, child);
+                }
 
                 var rs = right * b;
                 sepNorm = iNorm[rs];
-                sepFull = NeedsFull ? iFull[rs] : default;
+                sepFull = NeedsFullComparison ? iFull[rs] : default;
                 sepPk = comparesPk ? iPk[rs] : 0;
                 child = right;
                 leftChild = node;
@@ -417,37 +422,35 @@ namespace OrdoMemory
             }
         }
 
-        void InnerInsertAt(int node, int pos, ulong norm, TKey full, ulong pk, int child)
+        void InnerInsertAt(int node, int pos, ulong norm, TKey full, ulong primaryKey, int child)
         {
             var baseSlot = node * b;
             var move = iCount[node] - pos;
             if (move > 0)
             {
                 Array.Copy(iNorm, baseSlot + pos, iNorm, baseSlot + pos + 1, move);
-                if (NeedsFull) Array.Copy(iFull, baseSlot + pos, iFull, baseSlot + pos + 1, move);
+                if (NeedsFullComparison) Array.Copy(iFull, baseSlot + pos, iFull, baseSlot + pos + 1, move);
                 if (comparesPk) Array.Copy(iPk, baseSlot + pos, iPk, baseSlot + pos + 1, move);
                 Array.Copy(iChild, baseSlot + pos, iChild, baseSlot + pos + 1, move);
             }
 
-            SetInner(baseSlot + pos, norm, full, pk, child);
+            SetInner(baseSlot + pos, norm, full, primaryKey, child);
             iCount[node]++;
         }
 
-        void SetInner(int slot, ulong norm, TKey full, ulong pk, int child)
+        void SetInner(int slot, ulong norm, TKey full, ulong primaryKey, int child)
         {
             iNorm[slot] = norm;
-            if (NeedsFull) iFull[slot] = full;
-            if (comparesPk) iPk[slot] = pk;
+            if (NeedsFullComparison) iFull[slot] = full;
+            if (comparesPk) iPk[slot] = primaryKey;
             iChild[slot] = child;
         }
 
-        // ---- 削除 ----
-
-        public bool Remove(TKey key, TPk pk)
+        public bool Remove(TKey key, TPrimaryKey primaryKey)
         {
             if (count == 0) return false;
 
-            var pkValue = ToU(pk);
+            var pkValue = ToU(primaryKey);
             var probe = MakeProbe(key, pkValue);
             var leaf = Descend(probe);
             var pos = LeafLowerBound(leaf, probe);
@@ -460,11 +463,11 @@ namespace OrdoMemory
             if (move > 0)
             {
                 Array.Copy(lNorm, baseSlot + pos + 1, lNorm, baseSlot + pos, move);
-                if (NeedsFull) Array.Copy(lFull, baseSlot + pos + 1, lFull, baseSlot + pos, move);
+                if (NeedsFullComparison) Array.Copy(lFull, baseSlot + pos + 1, lFull, baseSlot + pos, move);
                 if (!packsPk) Array.Copy(lPk, baseSlot + pos + 1, lPk, baseSlot + pos, move);
             }
 
-            if (NeedsFull) lFull[baseSlot + n] = default;
+            if (NeedsFullComparison) lFull[baseSlot + n] = default;
             lCount[leaf] = n;
             count--;
 
@@ -481,7 +484,6 @@ namespace OrdoMemory
             return true;
         }
 
-        // level のノードから pathPos[level] の子を外す. 空になったら親からも外す.
         void RemoveFromParent(int level)
         {
             while (true)
@@ -494,17 +496,16 @@ namespace OrdoMemory
                 if (move > 0)
                 {
                     Array.Copy(iNorm, baseSlot + pos + 1, iNorm, baseSlot + pos, move);
-                    if (NeedsFull) Array.Copy(iFull, baseSlot + pos + 1, iFull, baseSlot + pos, move);
+                    if (NeedsFullComparison) Array.Copy(iFull, baseSlot + pos + 1, iFull, baseSlot + pos, move);
                     if (comparesPk) Array.Copy(iPk, baseSlot + pos + 1, iPk, baseSlot + pos, move);
                     Array.Copy(iChild, baseSlot + pos + 1, iChild, baseSlot + pos, move);
                 }
 
-                if (NeedsFull) iFull[baseSlot + n] = default;
+                if (NeedsFullComparison) iFull[baseSlot + n] = default;
                 iCount[node] = n;
 
                 if (level == height)
                 {
-                    // 子が 1 つの根は取り除く.
                     while (height > 0 && iCount[root] == 1)
                     {
                         var old = root;
@@ -522,15 +523,9 @@ namespace OrdoMemory
             }
         }
 
-        // ---- 一括挿入 / 作り直し ----
-
-        /// <summary>
-        /// 件数が既存に比べて少なければ 1 件ずつ挿入し、多ければ整列してマージし、下から作り直す.
-        /// 重複 (Unique では SecondaryKey の重複) があれば何も変更せず false を返す.
-        /// </summary>
-        public bool AddRange(ReadOnlySpan<TKey> keys, ReadOnlySpan<TPk> pks)
+        public bool AddRange(ReadOnlySpan<TKey> keys, ReadOnlySpan<TPrimaryKey> primaryKeys)
         {
-            if (pks.Length < keys.Length) throw new ArgumentException("pks is shorter than keys.", nameof(pks));
+            if (primaryKeys.Length < keys.Length) throw new ArgumentException("primaryKeys is shorter than keys.", nameof(primaryKeys));
 
             var k = keys.Length;
             if (k == 0) return true;
@@ -539,18 +534,21 @@ namespace OrdoMemory
             {
                 for (var i = 0; i < k; i++)
                 {
-                    if (Insert(keys[i], pks[i])) continue;
-                    for (var j = 0; j < i; j++) Remove(keys[j], pks[j]);
+                    if (Insert(keys[i], primaryKeys[i])) continue;
+                    for (var j = 0; j < i; j++)
+                    {
+                        Remove(keys[j], primaryKeys[j]);
+                    }
+
                     return false;
                 }
 
                 return true;
             }
 
-            return MergeRebuild(keys, pks);
+            return MergeRebuild(keys, primaryKeys);
         }
 
-        // 余った容量を返す. ノードを満杯に詰めて作り直す.
         public void TrimExcess()
         {
             var buf = new EntryBuffer(count);
@@ -560,7 +558,10 @@ namespace OrdoMemory
                 for (var leaf = LeftmostLeaf(); leaf >= 0; leaf = lNext[leaf])
                 {
                     var baseSlot = leaf * b;
-                    for (var i = 0; i < lCount[leaf]; i++) buf.Set(w++, lNorm[baseSlot + i], NeedsFull ? lFull[baseSlot + i] : default, PkAtSlot(baseSlot + i));
+                    for (var i = 0; i < lCount[leaf]; i++)
+                    {
+                        buf.Set(w++, lNorm[baseSlot + i], NeedsFullComparison ? lFull[baseSlot + i] : default, PkAtSlot(baseSlot + i));
+                    }
                 }
 
                 Build(buf, w);
@@ -571,7 +572,7 @@ namespace OrdoMemory
             }
         }
 
-        bool MergeRebuild(ReadOnlySpan<TKey> keys, ReadOnlySpan<TPk> pks)
+        bool MergeRebuild(ReadOnlySpan<TKey> keys, ReadOnlySpan<TPrimaryKey> primaryKeys)
         {
             var k = keys.Length;
             var incoming = new EntryBuffer(k);
@@ -581,15 +582,15 @@ namespace OrdoMemory
             {
                 for (var i = 0; i < k; i++)
                 {
-                    var probe = MakeProbe(keys[i], ToU(pks[i]));
-                    incoming.Set(i, probe.Norm, keys[i], pks[i]);
+                    var probe = MakeProbe(keys[i], ToU(primaryKeys[i]));
+                    incoming.Set(i, probe.Norm, keys[i], primaryKeys[i]);
                     order[i] = i;
                 }
 
                 sortComparer ??= new EntryComparer(this);
-                sortComparer.Target = incoming;
+                sortComparer.target = incoming;
                 Array.Sort(order, 0, k, sortComparer);
-                sortComparer.Target = default;
+                sortComparer.target = default;
 
                 var w = 0;
                 var leaf = LeftmostLeaf();
@@ -604,11 +605,11 @@ namespace OrdoMemory
                     }
 
                     var src = order[j];
-                    var probe = new Probe(incoming.Norm[src], NeedsFull ? incoming.Full[src] : default, ToU(incoming.Pk[src]));
+                    var probe = new Probe(incoming.Norm[src], NeedsFullComparison ? incoming.Full[src] : default, ToU(incoming.Pk[src]));
                     if (j > 0)
                     {
                         var prev = order[j - 1];
-                        if (Compare(incoming.Norm[prev], NeedsFull ? incoming.Full[prev] : default, ToU(incoming.Pk[prev]), probe) == 0) return false;
+                        if (Compare(incoming.Norm[prev], NeedsFullComparison ? incoming.Full[prev] : default, ToU(incoming.Pk[prev]), probe) == 0) return false;
                     }
 
                     var c = leaf >= 0 ? CompareLeaf(leaf * b + pos, probe) : 1;
@@ -616,12 +617,12 @@ namespace OrdoMemory
                     if (c < 0)
                     {
                         var slot = leaf * b + pos;
-                        merged.Set(w++, lNorm[slot], NeedsFull ? lFull[slot] : default, PkAtSlot(slot));
+                        merged.Set(w++, lNorm[slot], NeedsFullComparison ? lFull[slot] : default, PkAtSlot(slot));
                         pos++;
                     }
                     else
                     {
-                        merged.Set(w++, incoming.Norm[src], NeedsFull ? incoming.Full[src] : default, incoming.Pk[src]);
+                        merged.Set(w++, incoming.Norm[src], NeedsFullComparison ? incoming.Full[src] : default, incoming.Pk[src]);
                         j++;
                     }
                 }
@@ -631,7 +632,7 @@ namespace OrdoMemory
                     for (; pos < lCount[leaf]; pos++)
                     {
                         var slot = leaf * b + pos;
-                        merged.Set(w++, lNorm[slot], NeedsFull ? lFull[slot] : default, PkAtSlot(slot));
+                        merged.Set(w++, lNorm[slot], NeedsFullComparison ? lFull[slot] : default, PkAtSlot(slot));
                     }
                 }
 
@@ -646,12 +647,15 @@ namespace OrdoMemory
             }
         }
 
-        // 整列済みのエントリから、葉を満杯に詰めて下から積む.
         void Build(in EntryBuffer entries, int n)
         {
             var leaves = Math.Max(1, (n + b - 1) / b);
             var inners = 0;
-            for (var width = leaves; width > 1; width = (width + b - 1) / b) inners += (width + b - 1) / b;
+            for (var width = leaves; width > 1; width = (width + b - 1) / b)
+            {
+                inners += (width + b - 1) / b;
+            }
+
             Reset(leaves, Math.Max(1, inners));
             count = n;
             if (n == 0) return;
@@ -660,7 +664,6 @@ namespace OrdoMemory
             var upper = ArrayPool<int>.Shared.Rent((leaves + b - 1) / b);
             try
             {
-                // Reset で作った根 (葉 0) から順に使う.
                 leafUsed = 0;
                 var prevLeaf = -1;
                 for (var l = 0; l < leaves; l++)
@@ -670,7 +673,7 @@ namespace OrdoMemory
                     var cnt = Math.Min(b, n - start);
                     var baseSlot = leaf * b;
                     Array.Copy(entries.Norm, start, lNorm, baseSlot, cnt);
-                    if (NeedsFull) Array.Copy(entries.Full, start, lFull, baseSlot, cnt);
+                    if (NeedsFullComparison) Array.Copy(entries.Full, start, lFull, baseSlot, cnt);
                     if (!packsPk) Array.Copy(entries.Pk, start, lPk, baseSlot, cnt);
 
                     lCount[leaf] = cnt;
@@ -694,8 +697,14 @@ namespace OrdoMemory
                         {
                             var child = level[start + i];
                             var cs = child * b;
-                            if (isLeafLevel) SetInner(node * b + i, lNorm[cs], NeedsFull ? lFull[cs] : default, comparesPk ? ToU(lPk[cs]) : 0, child);
-                            else SetInner(node * b + i, iNorm[cs], NeedsFull ? iFull[cs] : default, comparesPk ? iPk[cs] : 0, child);
+                            if (isLeafLevel)
+                            {
+                                SetInner(node * b + i, lNorm[cs], NeedsFullComparison ? lFull[cs] : default, comparesPk ? ToU(lPk[cs]) : 0, child);
+                            }
+                            else
+                            {
+                                SetInner(node * b + i, iNorm[cs], NeedsFullComparison ? iFull[cs] : default, comparesPk ? iPk[cs] : 0, child);
+                            }
                         }
 
                         iCount[node] = cnt;
@@ -723,7 +732,11 @@ namespace OrdoMemory
         int LeftmostLeaf()
         {
             var node = root;
-            for (var level = height; level > 0; level--) node = iChild[node * b];
+            for (var level = height; level > 0; level--)
+            {
+                node = iChild[node * b];
+            }
+
             return node;
         }
 
@@ -731,20 +744,20 @@ namespace OrdoMemory
         {
             public readonly ulong[] Norm;
             public readonly TKey[] Full;
-            public readonly TPk[] Pk;
+            public readonly TPrimaryKey[] Pk;
 
             public EntryBuffer(int n)
             {
                 Norm = ArrayPool<ulong>.Shared.Rent(Math.Max(1, n));
-                Full = NeedsFull ? ArrayPool<TKey>.Shared.Rent(Math.Max(1, n)) : null;
-                Pk = ArrayPool<TPk>.Shared.Rent(Math.Max(1, n));
+                Full = NeedsFullComparison ? ArrayPool<TKey>.Shared.Rent(Math.Max(1, n)) : null;
+                Pk = ArrayPool<TPrimaryKey>.Shared.Rent(Math.Max(1, n));
             }
 
-            public void Set(int i, ulong norm, TKey full, TPk pk)
+            public void Set(int i, ulong norm, TKey full, TPrimaryKey primaryKey)
             {
                 Norm[i] = norm;
                 if (Full != null) Full[i] = full;
-                Pk[i] = pk;
+                Pk[i] = primaryKey;
             }
 
             public void Return()
@@ -752,35 +765,33 @@ namespace OrdoMemory
                 if (Norm == null) return;
                 ArrayPool<ulong>.Shared.Return(Norm);
                 if (Full != null) ArrayPool<TKey>.Shared.Return(Full, true);
-                ArrayPool<TPk>.Shared.Return(Pk);
+                ArrayPool<TPrimaryKey>.Shared.Return(Pk);
             }
         }
 
         sealed class EntryComparer : IComparer<int>
         {
-            readonly OrderedIndex<TKey, TKeyTraits, TPk, TPkTraits> index;
-            public EntryBuffer Target;
+            readonly OrderedIndex<TKey, TKeyTraits, TPrimaryKey, TPrimaryKeyTraits> index;
+            public EntryBuffer target;
 
-            public EntryComparer(OrderedIndex<TKey, TKeyTraits, TPk, TPkTraits> index)
+            public EntryComparer(OrderedIndex<TKey, TKeyTraits, TPrimaryKey, TPrimaryKeyTraits> index)
             {
                 this.index = index;
             }
 
             public int Compare(int x, int y)
             {
-                var t = Target;
-                var probe = new Probe(t.Norm[y], NeedsFull ? t.Full[y] : default, ToU(t.Pk[y]));
-                return index.Compare(t.Norm[x], NeedsFull ? t.Full[x] : default, ToU(t.Pk[x]), probe);
+                var t = target;
+                var probe = new Probe(t.Norm[y], NeedsFullComparison ? t.Full[y] : default, ToU(t.Pk[y]));
+                return index.Compare(t.Norm[x], NeedsFullComparison ? t.Full[x] : default, ToU(t.Pk[x]), probe);
             }
         }
-
-        // ---- ノードの確保 ----
 
         void Reset(int leafCapacity, int innerCapacity)
         {
             lNorm = new ulong[leafCapacity * b];
-            lFull = NeedsFull ? new TKey[leafCapacity * b] : null;
-            lPk = packsPk ? null : new TPk[leafCapacity * b];
+            lFull = NeedsFullComparison ? new TKey[leafCapacity * b] : null;
+            lPk = packsPk ? null : new TPrimaryKey[leafCapacity * b];
             lCount = new int[leafCapacity];
             lNext = new int[leafCapacity];
             lPrev = new int[leafCapacity];
@@ -788,14 +799,13 @@ namespace OrdoMemory
             leafFree = -1;
 
             iNorm = new ulong[innerCapacity * b];
-            iFull = NeedsFull ? new TKey[innerCapacity * b] : null;
+            iFull = NeedsFullComparison ? new TKey[innerCapacity * b] : null;
             iPk = comparesPk ? new ulong[innerCapacity * b] : null;
             iChild = new int[innerCapacity * b];
             iCount = new int[innerCapacity];
             innerUsed = 0;
             innerFree = -1;
 
-            // 根は常に存在させ、挿入と探索で空の木を特別扱いしない.
             root = AllocLeaf();
             height = 0;
             count = 0;
@@ -822,7 +832,7 @@ namespace OrdoMemory
                 {
                     var cap = lCount.Length * 2;
                     Array.Resize(ref lNorm, cap * b);
-                    if (NeedsFull) Array.Resize(ref lFull, cap * b);
+                    if (NeedsFullComparison) Array.Resize(ref lFull, cap * b);
                     if (!packsPk) Array.Resize(ref lPk, cap * b);
                     Array.Resize(ref lCount, cap);
                     Array.Resize(ref lNext, cap);
@@ -858,7 +868,7 @@ namespace OrdoMemory
                 {
                     var cap = iCount.Length * 2;
                     Array.Resize(ref iNorm, cap * b);
-                    if (NeedsFull) Array.Resize(ref iFull, cap * b);
+                    if (NeedsFullComparison) Array.Resize(ref iFull, cap * b);
                     if (comparesPk) Array.Resize(ref iPk, cap * b);
                     Array.Resize(ref iChild, cap * b);
                     Array.Resize(ref iCount, cap);
@@ -873,7 +883,7 @@ namespace OrdoMemory
 
         void FreeInner(int node)
         {
-            if (NeedsFull) Array.Clear(iFull, node * b, b);
+            if (NeedsFullComparison) Array.Clear(iFull, node * b, b);
             iCount[node] = innerFree;
             innerFree = node;
         }

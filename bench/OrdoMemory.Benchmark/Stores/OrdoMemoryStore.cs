@@ -4,22 +4,28 @@ namespace OrdoMemory.Benchmark.Stores
 {
     public sealed class OrdoMemoryStore : IStore
     {
-        OrdoItemTable table = new OrdoItemTable();
+        OrdoItemTable table = new();
 
         public void BulkLoad(ItemData[] rows, long[] keys)
         {
             var items = new OrdoItem[rows.Length];
-            for (var i = 0; i < rows.Length; i++) items[i] = ToItem(rows[i]);
+            for (var i = 0; i < rows.Length; i++)
+            {
+                items[i] = ToItem(rows[i]);
+            }
 
-            var pks = new uint[rows.Length];
-            if (!table.TryBulkInsert(items, pks)) throw new InvalidOperationException("bulk insert failed");
-            for (var i = 0; i < pks.Length; i++) keys[i] = pks[i];
+            var primaryKeys = new uint[rows.Length];
+            if (!table.TryBulkInsert(items, primaryKeys)) throw new InvalidOperationException("bulk insert failed");
+            for (var i = 0; i < primaryKeys.Length; i++)
+            {
+                keys[i] = primaryKeys[i];
+            }
         }
 
         public long Insert(in ItemData row)
         {
-            if (!table.TryInsert(ToItem(row), out var pk)) throw new InvalidOperationException("insert failed");
-            return pk;
+            if (!table.TryInsert(ToItem(row), out var primaryKey)) throw new InvalidOperationException("insert failed");
+            return primaryKey;
         }
 
         public bool TryFind(long key, out ItemData row)
@@ -64,15 +70,27 @@ namespace OrdoMemory.Benchmark.Stores
             return sum;
         }
 
-        public bool UpdateValue(long key, int value) => table.Update((uint)key, value: value);
+        public bool UpdateValue(long key, int value)
+        {
+            return table.Update((uint)key, value: value);
+        }
 
-        public bool UpdateCategory(long key, int category) => table.Update((uint)key, category: category);
+        public bool UpdateCategory(long key, int category)
+        {
+            return table.Update((uint)key, category: category);
+        }
 
-        public bool Remove(long key) => table.Remove((uint)key);
+        public bool Remove(long key)
+        {
+            return table.Remove((uint)key);
+        }
 
         public void UpdateValues(long[] keys, int[] values)
         {
-            for (var i = 0; i < keys.Length; i++) table.Update((uint)keys[i], value: values[i]);
+            for (var i = 0; i < keys.Length; i++)
+            {
+                table.Update((uint)keys[i], value: values[i]);
+            }
         }
 
         public void Dispose()
@@ -80,15 +98,21 @@ namespace OrdoMemory.Benchmark.Stores
             table = null;
         }
 
-        static OrdoItem ToItem(in ItemData row) => new OrdoItem(row.Code, row.Category, row.Name, row.Value, row.Description);
-
-        static ItemData ToData(in OrdoItem item) => new ItemData
+        static OrdoItem ToItem(in ItemData row)
         {
-            Code = item.Code,
-            Category = item.Category,
-            Value = item.Value,
-            Name = item.Name,
-            Description = item.Description,
-        };
+            return new OrdoItem(row.code, row.category, row.name, row.value, row.description);
+        }
+
+        static ItemData ToData(in OrdoItem item)
+        {
+            return new ItemData
+            {
+                code = item.Code,
+                category = item.Category,
+                value = item.Value,
+                name = item.Name,
+                description = item.Description
+            };
+        }
     }
 }

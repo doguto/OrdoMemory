@@ -2,10 +2,6 @@ using BenchmarkDotNet.Attributes;
 
 namespace OrdoMemory.Benchmark.Benchmarks
 {
-    /// <summary>
-    /// 読み取りのみ. 全ての比較対象で測る.
-    /// 名前の対応: ReadRandom = db_bench readrandom, ReadZipfian = YCSB Workload C, ScanAll = db_bench readseq.
-    /// </summary>
     public class ReadBenchmarks : StoreBenchmarkBase
     {
         public const int RangeLength = 64;
@@ -23,7 +19,10 @@ namespace OrdoMemory.Benchmark.Benchmarks
 
             var zipf = new Zipfian(N, Seed + 4);
             zipfian = new int[StreamLength];
-            for (var i = 0; i < zipfian.Length; i++) zipfian[i] = zipf.Next();
+            for (var i = 0; i < zipfian.Length; i++)
+            {
+                zipfian[i] = zipf.Next();
+            }
         }
 
         [Benchmark(OperationsPerInvoke = Ops, Description = "PK (uniform)")]
@@ -34,7 +33,7 @@ namespace OrdoMemory.Benchmark.Benchmarks
             for (var i = 0; i < Ops; i++)
             {
                 store.TryFind(keys[uniform[start + i]], out var row);
-                sum += row.Value;
+                sum += row.value;
             }
 
             return sum;
@@ -48,7 +47,7 @@ namespace OrdoMemory.Benchmark.Benchmarks
             for (var i = 0; i < Ops; i++)
             {
                 store.TryFind(keys[zipfian[start + i]], out var row);
-                sum += row.Value;
+                sum += row.value;
             }
 
             return sum;
@@ -61,8 +60,8 @@ namespace OrdoMemory.Benchmark.Benchmarks
             long sum = 0;
             for (var i = 0; i < Ops; i++)
             {
-                store.TryFindByCode(rows[uniform[start + i]].Code, out var row);
-                sum += row.Value;
+                store.TryFindByCode(rows[uniform[start + i]].code, out var row);
+                sum += row.value;
             }
 
             return sum;
@@ -75,8 +74,8 @@ namespace OrdoMemory.Benchmark.Benchmarks
             long sum = 0;
             for (var i = 0; i < Ops; i++)
             {
-                store.TryFindByName(rows[uniform[start + i]].Name, out var row);
-                sum += row.Value;
+                store.TryFindByName(rows[uniform[start + i]].name, out var row);
+                sum += row.value;
             }
 
             return sum;
@@ -87,7 +86,11 @@ namespace OrdoMemory.Benchmark.Benchmarks
         {
             var start = NextBlock();
             long sum = 0;
-            for (var i = 0; i < Ops; i++) sum += store.SumByCategory(categoryStream[start + i]);
+            for (var i = 0; i < Ops; i++)
+            {
+                sum += store.SumByCategory(categoryStream[start + i]);
+            }
+
             return sum;
         }
 

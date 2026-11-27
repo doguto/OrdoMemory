@@ -2,31 +2,31 @@ using System;
 
 namespace OrdoMemory
 {
-    public enum PkKind
+    public enum PrimaryKeyKind
     {
         UInt32,
-        UInt64,
+        UInt64
     }
 
     public enum IndexKind
     {
         Ordered,
-        Hash,
+        Hash
     }
 
-    /// <summary>
-    /// readonly partial struct に付けると、コンストラクタと {Struct}Table を生成する.
-    /// </summary>
     [AttributeUsage(AttributeTargets.Struct, Inherited = false)]
     public sealed class OrdoTableAttribute : Attribute
     {
-        /// <summary>生成するテーブルの型名. 省略時は {Struct}Table.</summary>
         public string TableName { get; set; }
 
-        public PkKind Pk { get; set; } = PkKind.UInt32;
+        public PrimaryKeyKind PrimaryKey { get; set; } = PrimaryKeyKind.UInt32;
 
-        /// <summary>PK のうちスロット番号に使うビット数. 0 は既定 (UInt32: 22, UInt64: 32).</summary>
         public int SlotBits { get; set; }
+    }
+
+    [AttributeUsage(AttributeTargets.Field, Inherited = false)]
+    public sealed class PrimaryKeyAttribute : Attribute
+    {
     }
 
     [AttributeUsage(AttributeTargets.Field, Inherited = false)]

@@ -5,15 +5,11 @@ using OrdoMemory.Benchmark.MasterMemoryDb.Tables;
 
 namespace OrdoMemory.Benchmark.Stores
 {
-    /// <summary>
-    /// 読み取り専用の不変 DB. 書き込みは ImmutableBuilder で全体を作り直す (1 回ごとに O(n log n)).
-    /// </summary>
     public sealed class MasterMemoryStore : IStore
     {
-        MemoryDatabase db = new MemoryDatabase(new MmItemTable(Array.Empty<MmItem>()));
+        MemoryDatabase db = new(new MmItemTable(Array.Empty<MmItem>()));
         int nextId = 1;
 
-        // 公式の手順どおり DatabaseBuilder でバイナリを作り、MemoryDatabase で読み込む.
         public void BulkLoad(ItemData[] rows, long[] keys)
         {
             var items = new MmItem[rows.Length];
@@ -62,7 +58,11 @@ namespace OrdoMemory.Benchmark.Stores
         {
             long sum = 0;
             var view = db.MmItemTable.FindByCategory(category);
-            for (var i = 0; i < view.Count; i++) sum += view[i].Value;
+            for (var i = 0; i < view.Count; i++)
+            {
+                sum += view[i].Value;
+            }
+
             return sum;
         }
 
@@ -70,7 +70,11 @@ namespace OrdoMemory.Benchmark.Stores
         {
             long sum = 0;
             var view = db.MmItemTable.FindRangeByCode(min, max);
-            for (var i = 0; i < view.Count; i++) sum += view[i].Value;
+            for (var i = 0; i < view.Count; i++)
+            {
+                sum += view[i].Value;
+            }
+
             return sum;
         }
 
@@ -78,7 +82,11 @@ namespace OrdoMemory.Benchmark.Stores
         {
             long sum = 0;
             var view = db.MmItemTable.All;
-            for (var i = 0; i < view.Count; i++) sum += view[i].Value;
+            for (var i = 0; i < view.Count; i++)
+            {
+                sum += view[i].Value;
+            }
+
             return sum;
         }
 
@@ -130,33 +138,42 @@ namespace OrdoMemory.Benchmark.Stores
             db = null;
         }
 
-        static MmItem ToItem(int id, in ItemData row) => new MmItem
+        static MmItem ToItem(int id, in ItemData row)
         {
-            Id = id,
-            Code = row.Code,
-            Category = row.Category,
-            Name = row.Name,
-            Value = row.Value,
-            Description = row.Description,
-        };
+            return new MmItem
+            {
+                Id = id,
+                Code = row.code,
+                Category = row.category,
+                Name = row.name,
+                Value = row.value,
+                Description = row.description
+            };
+        }
 
-        static MmItem Clone(MmItem item) => new MmItem
+        static MmItem Clone(MmItem item)
         {
-            Id = item.Id,
-            Code = item.Code,
-            Category = item.Category,
-            Name = item.Name,
-            Value = item.Value,
-            Description = item.Description,
-        };
+            return new MmItem
+            {
+                Id = item.Id,
+                Code = item.Code,
+                Category = item.Category,
+                Name = item.Name,
+                Value = item.Value,
+                Description = item.Description
+            };
+        }
 
-        static ItemData ToData(MmItem item) => new ItemData
+        static ItemData ToData(MmItem item)
         {
-            Code = item.Code,
-            Category = item.Category,
-            Value = item.Value,
-            Name = item.Name,
-            Description = item.Description,
-        };
+            return new ItemData
+            {
+                code = item.Code,
+                category = item.Category,
+                value = item.Value,
+                name = item.Name,
+                description = item.Description
+            };
+        }
     }
 }

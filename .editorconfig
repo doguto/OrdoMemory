@@ -1,0 +1,100 @@
+root = true
+
+[*]
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{csproj,props,targets,xml,json,yml,yaml}]
+indent_size = 2
+
+[*.cs]
+# Unity (C# 9) では file-scoped namespace が使えない
+csharp_style_namespace_declarations = block_scoped:warning
+
+dotnet_style_require_accessibility_modifiers = omit_if_default:warning
+dotnet_style_qualification_for_field = false:suggestion
+dotnet_style_qualification_for_property = false:suggestion
+dotnet_style_qualification_for_method = false:suggestion
+dotnet_style_qualification_for_event = false:suggestion
+
+csharp_style_var_for_built_in_types = true:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_elsewhere = true:suggestion
+
+csharp_style_expression_bodied_properties = when_on_single_line:suggestion
+csharp_style_expression_bodied_accessors = when_on_single_line:suggestion
+
+# if は 1 行に収まるなら省略可. ループ等は Rider 側で常に必須にする
+csharp_prefer_braces = when_multiline:warning
+resharper_braces_for_ifelse = required_for_multiline
+resharper_braces_for_for = required
+resharper_braces_for_foreach = required
+resharper_braces_for_while = required
+resharper_braces_for_dowhile = required
+resharper_braces_for_using = required
+resharper_braces_for_lock = required
+resharper_braces_for_fixed = required
+resharper_braces_redundant = false
+
+csharp_new_line_before_open_brace = all
+csharp_new_line_before_else = true
+csharp_new_line_before_catch = true
+csharp_new_line_before_finally = true
+csharp_indent_case_contents = true
+csharp_indent_switch_labels = true
+csharp_using_directive_placement = outside_namespace:warning
+dotnet_sort_system_directives_first = true
+
+# 命名規則
+dotnet_naming_symbols.types.applicable_kinds = class, struct, enum, delegate, namespace
+dotnet_naming_symbols.interfaces.applicable_kinds = interface
+dotnet_naming_symbols.type_parameters.applicable_kinds = type_parameter
+dotnet_naming_symbols.members.applicable_kinds = method, property, event, local_function
+dotnet_naming_symbols.constants.applicable_kinds = field, local
+dotnet_naming_symbols.constants.required_modifiers = const
+dotnet_naming_symbols.constants.applicable_accessibilities = public, internal, protected, protected_internal, private_protected, private, local
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_symbols.locals_and_parameters.applicable_kinds = parameter, local
+dotnet_naming_symbols.locals_and_parameters.applicable_accessibilities = *
+
+dotnet_naming_style.pascal_case.capitalization = pascal_case
+dotnet_naming_style.camel_case.capitalization = camel_case
+dotnet_naming_style.interface.capitalization = pascal_case
+dotnet_naming_style.interface.required_prefix = I
+dotnet_naming_style.type_parameter.capitalization = pascal_case
+dotnet_naming_style.type_parameter.required_prefix = T
+
+dotnet_naming_rule.interfaces.symbols = interfaces
+dotnet_naming_rule.interfaces.style = interface
+dotnet_naming_rule.interfaces.severity = warning
+
+dotnet_naming_rule.type_parameters.symbols = type_parameters
+dotnet_naming_rule.type_parameters.style = type_parameter
+dotnet_naming_rule.type_parameters.severity = warning
+
+dotnet_naming_rule.types.symbols = types
+dotnet_naming_rule.types.style = pascal_case
+dotnet_naming_rule.types.severity = warning
+
+dotnet_naming_rule.members.symbols = members
+dotnet_naming_rule.members.style = pascal_case
+dotnet_naming_rule.members.severity = warning
+
+dotnet_naming_rule.constants.symbols = constants
+dotnet_naming_rule.constants.style = pascal_case
+dotnet_naming_rule.constants.severity = warning
+
+dotnet_naming_rule.private_fields.symbols = private_fields
+dotnet_naming_rule.private_fields.style = camel_case
+dotnet_naming_rule.private_fields.severity = warning
+
+dotnet_naming_rule.locals_and_parameters.symbols = locals_and_parameters
+dotnet_naming_rule.locals_and_parameters.style = camel_case
+dotnet_naming_rule.locals_and_parameters.severity = warning
+
+# 非 private フィールドは Row の列 (PascalCase) と内部用 (camelCase) が混在するため両方許容する
+resharper_csharp_naming_rule.public_fields = AaBb, aaBb

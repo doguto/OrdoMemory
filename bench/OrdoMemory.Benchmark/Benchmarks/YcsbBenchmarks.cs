@@ -10,19 +10,9 @@ namespace OrdoMemory.Benchmark.Benchmarks
         B,
         D,
         E,
-        F,
+        F
     }
 
-    /// <summary>
-    /// YCSB のコアワークロード (https://github.com/brianfrankcooper/YCSB/wiki/Core-Workloads).
-    ///   A: read 50 / update 50 (zipfian)
-    ///   B: read 95 / update 5 (zipfian)
-    ///   C: read 100 → ReadBenchmarks.ReadZipfian
-    ///   D: read 95 / insert 5 (最近挿入したものほど読む)
-    ///   E: scan 95 / insert 5 (開始位置 zipfian, 長さ 1〜100 の一様分布)
-    ///   F: read 50 / read-modify-write 50 (zipfian)
-    /// YCSB との違い: insert は最も古い Record を消してから入れ、件数を N に保つ (繰り返し呼んでも状態が変わらないように).
-    /// </summary>
     public class YcsbBenchmarks : StoreBenchmarkBase
     {
         const int MaxScanLength = 100;
@@ -33,7 +23,7 @@ namespace OrdoMemory.Benchmark.Benchmarks
             Update,
             Insert,
             Scan,
-            ReadModifyWrite,
+            ReadModifyWrite
         }
 
         Op[] ops;
@@ -51,7 +41,7 @@ namespace OrdoMemory.Benchmark.Benchmarks
         {
             var rng = new Rng(Seed + 31);
             var scrambled = new Zipfian(N, Seed + 32);
-            var latest = new Zipfian(N, Seed + 33, scramble: false);
+            var latest = new Zipfian(N, Seed + 33, false);
             valueRng = new Rng(Seed + 34);
 
             ops = new Op[StreamLength];
@@ -100,7 +90,7 @@ namespace OrdoMemory.Benchmark.Benchmarks
                 {
                     case Op.Read:
                         store.TryFind(keys[ReadIndex(args[i])], out var row);
-                        sum += row.Value;
+                        sum += row.value;
                         break;
                     case Op.Update:
                         store.UpdateValue(keys[args[i]], valueRng.Next(1_000_000));
@@ -115,7 +105,7 @@ namespace OrdoMemory.Benchmark.Benchmarks
                     case Op.ReadModifyWrite:
                         var key = keys[args[i]];
                         store.TryFind(key, out var current);
-                        store.UpdateValue(key, current.Value + 1);
+                        store.UpdateValue(key, current.value + 1);
                         break;
                 }
             }
@@ -123,7 +113,6 @@ namespace OrdoMemory.Benchmark.Benchmarks
             return sum;
         }
 
-        // D では args は「最新から何番目か」. 論理位置は挿入順に並び、oldest - 1 が最新.
         int ReadIndex(int arg)
         {
             if (Workload != YcsbWorkload.D) return arg;

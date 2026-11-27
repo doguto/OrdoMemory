@@ -5,9 +5,8 @@ using BenchmarkDotNet.Running;
 
 namespace OrdoMemory.Benchmark
 {
-    static class Program
+    internal static class Program
     {
-        // verify / footprint [出力先] / それ以外は BenchmarkDotNet の引数 (--filter, --job 等).
         static int Main(string[] args)
         {
             if (args.Length > 0 && args[0] == "verify") return Verify.Run() ? 0 : 1;
@@ -19,10 +18,10 @@ namespace OrdoMemory.Benchmark
             }
 
             var config = DefaultConfig.Instance
-                .AddDiagnoser(MemoryDiagnoser.Default)
-                .AddColumn(StatisticColumn.P95)
-                .HideColumns(Column.Error, Column.StdDev, Column.RatioSD)
-                .WithOptions(ConfigOptions.DisableLogFile);
+                                      .AddDiagnoser(MemoryDiagnoser.Default)
+                                      .AddColumn(StatisticColumn.P95)
+                                      .HideColumns(Column.Error, Column.StdDev, Column.RatioSD)
+                                      .WithOptions(ConfigOptions.DisableLogFile);
 
             BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args, config);
             return 0;

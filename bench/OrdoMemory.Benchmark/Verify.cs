@@ -3,9 +3,6 @@ using System.Collections.Generic;
 
 namespace OrdoMemory.Benchmark
 {
-    /// <summary>
-    /// 同じ操作列を全ストアで実行し、結果の列を Dictionary 版と突き合わせる. 計測の前に通すこと.
-    /// </summary>
     public static class Verify
     {
         const int N = 2000;
@@ -38,7 +35,11 @@ namespace OrdoMemory.Benchmark
 
             using var store = StoreFactory.Create(target);
             store.BulkLoad(rows, keys);
-            for (var i = 0; i < N; i++) alive[i] = true;
+            for (var i = 0; i < N; i++)
+            {
+                alive[i] = true;
+            }
+
             trace.Add(store.SumAll());
 
             for (var step = 0; step < Steps; step++)
@@ -108,7 +109,7 @@ namespace OrdoMemory.Benchmark
         static long Hash(bool found, in ItemData row)
         {
             if (!found) return -1;
-            return HashCode.Combine(row.Code, row.Category, row.Value, row.Name, row.Description) & 0x7FFFFFFF;
+            return HashCode.Combine(row.code, row.category, row.value, row.name, row.description) & 0x7FFFFFFF;
         }
 
         static int FirstMismatch(List<long> expected, List<long> actual)
@@ -122,6 +123,9 @@ namespace OrdoMemory.Benchmark
             return -1;
         }
 
-        static string Get(List<long> list, int i) => i < list.Count ? list[i].ToString() : "(none)";
+        static string Get(List<long> list, int i)
+        {
+            return i < list.Count ? list[i].ToString() : "(none)";
+        }
     }
 }

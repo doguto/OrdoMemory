@@ -6,13 +6,8 @@ using OrdoMemory.Benchmark.Stores;
 
 namespace OrdoMemory.Benchmark
 {
-    /// <summary>
-    /// 比較対象の共通操作. 検索は Record 全体を取り出す (SQL の SELECT * 相当) ところまでを含める.
-    /// キーは各ストアの PK (OrdoMemory はハンドル、それ以外は採番した Id).
-    /// </summary>
     public interface IStore : IDisposable
     {
-        // 空のストアにのみ呼ぶ. 各ストアの一括挿入の手段を使う.
         void BulkLoad(ItemData[] rows, long[] keys);
 
         long Insert(in ItemData row);
@@ -23,7 +18,6 @@ namespace OrdoMemory.Benchmark
 
         bool TryFindByName(string name, out ItemData row);
 
-        // 以下の集計は、該当する Record を全て取り出して Value を足す.
         long SumByCategory(int category);
 
         long SumRangeByCode(int min, int max);
@@ -36,7 +30,6 @@ namespace OrdoMemory.Benchmark
 
         bool Remove(long key);
 
-        // 各ストアのまとめて書く手段 (トランザクション / ImmutableBuilder) で更新する.
         void UpdateValues(long[] keys, int[] values);
     }
 
@@ -50,13 +43,15 @@ namespace OrdoMemory.Benchmark
         SqliteNet,
         SqliteNetInMemory,
         LiteDb,
-        LiteDbInMemory,
+        LiteDbInMemory
     }
 
     public static class StoreFactory
     {
-        // 1 件ごとの書き込みで全体を作り直す (O(n)) ため、1 件ずつ書くベンチマークからは外す.
-        public static bool SupportsPointWrites(Target target) => target != Target.MasterMemory;
+        public static bool SupportsPointWrites(Target target)
+        {
+            return target != Target.MasterMemory;
+        }
 
         public static IStore Create(Target target)
         {
@@ -90,18 +85,11 @@ namespace OrdoMemory.Benchmark
                 if (File.Exists(file)) File.Delete(file);
             }
 
-            // LiteDB のログは "{name}-log.db".
             var log = Path.Combine(Path.GetDirectoryName(path), Path.GetFileNameWithoutExtension(path) + "-log" + Path.GetExtension(path));
             if (File.Exists(log)) File.Delete(log);
         }
     }
 
-    /// <summary>
-    /// BenchmarkDotNet の Params はコマンドラインから変えられないため、環境変数で絞る.
-    /// 子プロセスにも引き継がれる.
-    ///   ORDO_BENCH_N       件数 (カンマ区切り). 既定 1000,10000,100000
-    ///   ORDO_BENCH_TARGETS 比較対象 (カンマ区切り). 既定は全て
-    /// </summary>
     public static class BenchEnv
     {
         public static IEnumerable<int> Sizes()
@@ -118,6 +106,9 @@ namespace OrdoMemory.Benchmark
             return value.Split(',').Select(s => (Target)Enum.Parse(typeof(Target), s.Trim(), true));
         }
 
-        public static IEnumerable<Target> WritableTargets() => Targets().Where(StoreFactory.SupportsPointWrites);
+        public static IEnumerable<Target> WritableTargets()
+        {
+            return Targets().Where(StoreFactory.SupportsPointWrites);
+        }
     }
 }

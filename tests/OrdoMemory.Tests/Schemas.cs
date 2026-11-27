@@ -4,51 +4,51 @@ namespace OrdoMemory.Tests
     {
         A,
         B,
-        C,
+        C
     }
 
     [OrdoTable]
     public readonly partial struct Item
     {
-        [SecondaryKey]
-        public readonly int Code;
+        [PrimaryKey] public readonly uint Id;
 
-        [SecondaryKey(Unique = false)]
-        public readonly string Name;
+        [SecondaryKey] public readonly int Code;
+
+        [SecondaryKey(Unique = false)] public readonly string Name;
 
         [SecondaryKey(IndexKind.Hash, Unique = false)]
         public readonly Kind Kind;
 
-        [SecondaryKey(IndexKind.Hash)]
-        public readonly string Tag;
+        [SecondaryKey(IndexKind.Hash)] public readonly string Tag;
 
-        [SecondaryKey(Unique = false)]
-        public readonly double Score;
+        [SecondaryKey(Unique = false)] public readonly double Score;
 
         public readonly string Description;
     }
 
-    [OrdoTable(Pk = PkKind.UInt64, TableName = "BigTable")]
+    [OrdoTable(PrimaryKey = PrimaryKeyKind.UInt64, TableName = "BigTable")]
     public readonly partial struct BigRow
     {
-        [SecondaryKey(Unique = false)]
-        public readonly long Value;
+        [PrimaryKey] public readonly ulong Id;
 
-        public readonly int Pk;
+        [SecondaryKey(Unique = false)] public readonly long Value;
+
+        public readonly int PrimaryKey;
     }
 
-    // 世代 1bit: 1 度削除したスロットは使用を止める.
     [OrdoTable(SlotBits = 31)]
     public readonly partial struct OneGenRow
     {
+        [PrimaryKey] public readonly uint Id;
+
         public readonly int Value;
     }
 
-    // スロット 2bit: 同時に 4 件まで.
     [OrdoTable(SlotBits = 2)]
     public readonly partial struct TinyRow
     {
-        [SecondaryKey]
-        public readonly int Value;
+        [PrimaryKey] public readonly uint Id;
+
+        [SecondaryKey] public readonly int Value;
     }
 }

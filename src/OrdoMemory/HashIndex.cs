@@ -3,12 +3,11 @@ using System.Collections.Generic;
 
 namespace OrdoMemory
 {
-    /// <summary>完全一致でしか引かない Unique な SecondaryKey の索引. null のキーも 1 件だけ持てる.</summary>
-    public sealed class HashUniqueIndex<TKey, TPk> where TPk : unmanaged
+    public sealed class HashUniqueIndex<TKey, TPrimaryKey> where TPrimaryKey : unmanaged
     {
-        readonly Dictionary<TKey, TPk> map = new Dictionary<TKey, TPk>(KeyComparer<TKey>.Default);
+        readonly Dictionary<TKey, TPrimaryKey> map = new(KeyComparer<TKey>.Default);
         bool hasNull;
-        TPk nullPk;
+        TPrimaryKey nullPrimaryKey;
 
         public int Count => map.Count + (hasNull ? 1 : 0);
 
@@ -17,48 +16,57 @@ namespace OrdoMemory
             return KeyComparer<TKey>.IsNull(key) ? hasNull : map.ContainsKey(key);
         }
 
-        public bool TryGetFirst(TKey key, out TPk pk)
+        public bool TryGetFirst(TKey key, out TPrimaryKey primaryKey)
         {
-            if (!KeyComparer<TKey>.IsNull(key)) return map.TryGetValue(key, out pk);
-            pk = hasNull ? nullPk : default;
+            if (!KeyComparer<TKey>.IsNull(key)) return map.TryGetValue(key, out primaryKey);
+            primaryKey = hasNull ? nullPrimaryKey : default;
             return hasNull;
         }
 
         public SingleEnumerator Equal(TKey key)
         {
-            var found = TryGetFirst(key, out var pk);
-            return new SingleEnumerator(found, pk);
+            var found = TryGetFirst(key, out var primaryKey);
+            return new SingleEnumerator(found, primaryKey);
         }
 
-        // 同じ SecondaryKey が既にある場合は何もせず false を返す.
-        public bool Insert(TKey key, TPk pk)
+        public bool Insert(TKey key, TPrimaryKey primaryKey)
         {
-            if (!KeyComparer<TKey>.IsNull(key)) return map.TryAdd(key, pk);
+            if (!KeyComparer<TKey>.IsNull(key)) return map.TryAdd(key, primaryKey);
             if (hasNull) return false;
             hasNull = true;
-            nullPk = pk;
+            nullPrimaryKey = primaryKey;
             return true;
         }
 
-        public bool Remove(TKey key, TPk pk)
+        public bool Remove(TKey key, TPrimaryKey primaryKey)
         {
-            if (!TryGetFirst(key, out var current) || !EqualityComparer<TPk>.Default.Equals(current, pk)) return false;
+            if (!TryGetFirst(key, out var current) || !EqualityComparer<TPrimaryKey>.Default.Equals(current, primaryKey)) return false;
 
-            if (!KeyComparer<TKey>.IsNull(key)) map.Remove(key);
-            else hasNull = false;
+            if (!KeyComparer<TKey>.IsNull(key))
+            {
+                map.Remove(key);
+            }
+            else
+            {
+                hasNull = false;
+            }
+
             return true;
         }
 
-        // 重複があれば何も変更せず false を返す.
-        public bool AddRange(ReadOnlySpan<TKey> keys, ReadOnlySpan<TPk> pks)
+        public bool AddRange(ReadOnlySpan<TKey> keys, ReadOnlySpan<TPrimaryKey> primaryKeys)
         {
-            if (pks.Length < keys.Length) throw new ArgumentException("pks is shorter than keys.", nameof(pks));
+            if (primaryKeys.Length < keys.Length) throw new ArgumentException("primaryKeys is shorter than keys.", nameof(primaryKeys));
 
             map.EnsureCapacity(map.Count + keys.Length);
             for (var i = 0; i < keys.Length; i++)
             {
-                if (Insert(keys[i], pks[i])) continue;
-                for (var j = 0; j < i; j++) Remove(keys[j], pks[j]);
+                if (Insert(keys[i], primaryKeys[i])) continue;
+                for (var j = 0; j < i; j++)
+                {
+                    Remove(keys[j], primaryKeys[j]);
+                }
+
                 return false;
             }
 
@@ -70,18 +78,18 @@ namespace OrdoMemory
             map.TrimExcess();
         }
 
-        public struct SingleEnumerator : IPkEnumerator<TPk>
+        public struct SingleEnumerator : IPrimaryKeyEnumerator<TPrimaryKey>
         {
-            readonly TPk pk;
+            readonly TPrimaryKey primaryKey;
             bool pending;
 
-            internal SingleEnumerator(bool found, TPk pk)
+            internal SingleEnumerator(bool found, TPrimaryKey primaryKey)
             {
-                this.pk = pk;
+                this.primaryKey = primaryKey;
                 pending = found;
             }
 
-            public TPk Current => pk;
+            public TPrimaryKey Current => primaryKey;
 
             public bool MoveNext()
             {
@@ -92,19 +100,15 @@ namespace OrdoMemory
         }
     }
 
-    /// <summary>
-    /// 完全一致でしか引かない非 Unique な SecondaryKey の索引.
-    /// 値ごとに PK の配列を持つ. PK は単調増加しないため配列は順序を持たず、削除は末尾との入れ替えとする.
-    /// </summary>
-    public sealed class HashMultiIndex<TKey, TPk> where TPk : unmanaged
+    public sealed class HashMultiIndex<TKey, TPrimaryKey> where TPrimaryKey : unmanaged
     {
         const int InitialPostingLength = 2;
 
-        readonly Dictionary<TKey, int> map = new Dictionary<TKey, int>(KeyComparer<TKey>.Default);
+        readonly Dictionary<TKey, int> map = new(KeyComparer<TKey>.Default);
         int nullPosting = -1;
 
-        TPk[][] postings = new TPk[4][];
-        int[] lengths = new int[4];   // 空きでは次の空きの番号
+        TPrimaryKey[][] postings = new TPrimaryKey[4][];
+        int[] lengths = new int[4];
         int postingUsed;
         int postingFree = -1;
         int count;
@@ -116,16 +120,16 @@ namespace OrdoMemory
             return Find(key) >= 0;
         }
 
-        public bool TryGetFirst(TKey key, out TPk pk)
+        public bool TryGetFirst(TKey key, out TPrimaryKey primaryKey)
         {
             var id = Find(key);
             if (id < 0)
             {
-                pk = default;
+                primaryKey = default;
                 return false;
             }
 
-            pk = postings[id][0];
+            primaryKey = postings[id][0];
             return true;
         }
 
@@ -135,15 +139,20 @@ namespace OrdoMemory
             return id < 0 ? default : new Enumerator(postings[id], lengths[id]);
         }
 
-        // 同じ組が既にあるかは確かめない (PK はテーブル内で一意なため).
-        public bool Insert(TKey key, TPk pk)
+        public bool Insert(TKey key, TPrimaryKey primaryKey)
         {
             var id = Find(key);
             if (id < 0)
             {
-                id = AllocPosting();
-                if (KeyComparer<TKey>.IsNull(key)) nullPosting = id;
-                else map.Add(key, id);
+                id = AllocatePosting();
+                if (KeyComparer<TKey>.IsNull(key))
+                {
+                    nullPosting = id;
+                }
+                else
+                {
+                    map.Add(key, id);
+                }
             }
 
             var list = postings[id];
@@ -154,32 +163,38 @@ namespace OrdoMemory
                 postings[id] = list;
             }
 
-            list[n] = pk;
+            list[n] = primaryKey;
             lengths[id] = n + 1;
             count++;
             return true;
         }
 
-        // その値の件数 p に対して O(p).
-        public bool Remove(TKey key, TPk pk)
+        public bool Remove(TKey key, TPrimaryKey primaryKey)
         {
             var id = Find(key);
             if (id < 0) return false;
 
             var list = postings[id];
             var last = lengths[id] - 1;
-            var comparer = EqualityComparer<TPk>.Default;
+            var comparer = EqualityComparer<TPrimaryKey>.Default;
             for (var i = 0; i <= last; i++)
             {
-                if (!comparer.Equals(list[i], pk)) continue;
+                if (!comparer.Equals(list[i], primaryKey)) continue;
 
                 list[i] = list[last];
                 lengths[id] = last;
                 count--;
                 if (last == 0)
                 {
-                    if (KeyComparer<TKey>.IsNull(key)) nullPosting = -1;
-                    else map.Remove(key);
+                    if (KeyComparer<TKey>.IsNull(key))
+                    {
+                        nullPosting = -1;
+                    }
+                    else
+                    {
+                        map.Remove(key);
+                    }
+
                     FreePosting(id);
                 }
 
@@ -189,10 +204,14 @@ namespace OrdoMemory
             return false;
         }
 
-        public bool AddRange(ReadOnlySpan<TKey> keys, ReadOnlySpan<TPk> pks)
+        public bool AddRange(ReadOnlySpan<TKey> keys, ReadOnlySpan<TPrimaryKey> primaryKeys)
         {
-            if (pks.Length < keys.Length) throw new ArgumentException("pks is shorter than keys.", nameof(pks));
-            for (var i = 0; i < keys.Length; i++) Insert(keys[i], pks[i]);
+            if (primaryKeys.Length < keys.Length) throw new ArgumentException("primaryKeys is shorter than keys.", nameof(primaryKeys));
+            for (var i = 0; i < keys.Length; i++)
+            {
+                Insert(keys[i], primaryKeys[i]);
+            }
+
             return true;
         }
 
@@ -212,7 +231,7 @@ namespace OrdoMemory
             return map.TryGetValue(key, out var id) ? id : -1;
         }
 
-        int AllocPosting()
+        int AllocatePosting()
         {
             int id;
             if (postingFree >= 0)
@@ -231,7 +250,7 @@ namespace OrdoMemory
                 id = postingUsed++;
             }
 
-            postings[id] = new TPk[InitialPostingLength];
+            postings[id] = new TPrimaryKey[InitialPostingLength];
             lengths[id] = 0;
             return id;
         }
@@ -243,20 +262,20 @@ namespace OrdoMemory
             postingFree = id;
         }
 
-        public struct Enumerator : IPkEnumerator<TPk>
+        public struct Enumerator : IPrimaryKeyEnumerator<TPrimaryKey>
         {
-            readonly TPk[] list;
+            readonly TPrimaryKey[] list;
             readonly int length;
             int index;
 
-            internal Enumerator(TPk[] list, int length)
+            internal Enumerator(TPrimaryKey[] list, int length)
             {
                 this.list = list;
                 this.length = length;
                 index = -1;
             }
 
-            public TPk Current => list[index];
+            public TPrimaryKey Current => list[index];
 
             public bool MoveNext()
             {

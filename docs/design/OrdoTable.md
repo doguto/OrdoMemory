@@ -32,17 +32,14 @@ ECS (EnTT, Unity Entities 等) で使われている「世代付きハンドル 
 // 生存している Record だけを隙間無く並べる. All はこれを先頭から読むだけ.
 Row[] dense;
 
-// dense[i] を指しているスロット. Remove で末尾を移すときに使う.
-int[] denseToSlot;
-
 // 生存件数. 次の書き込み先の添字でもある.
 int count;
 
 // スロット番号 → dense の位置. ハンドルの下位ビットがスロット番号.
 struct Slot
 {
-    public int Dense;  // 使用中: dense の位置 / 空き: 次の空きスロット (空きリスト)
-    public uint Gen;   // 世代. 1 から始め、スロットを再利用するたびに進める. 0 は未使用 / 使用停止
+    public int dense;  // 使用中: dense の位置 / 空き: 次の空きスロット (空きリスト)
+    public uint generation;   // 世代. 1 から始め、スロットを再利用するたびに進める. 0 は未使用 / 使用停止
 }
 Slot[] slots;
 
@@ -54,7 +51,9 @@ int freeHead;
 ```
 
 - `Slot` は 1 つの struct にまとめ、Find で触るキャッシュラインを 1 本にする.
-- Record (Row) は PK を持たない. PK が必要な場合は、列挙子の `CurrentPk` か `denseToSlot` と `slots` から求める.
+- Record (Row) は自身の PK を持つ. 検索や列挙で得た Record から、他のテーブルや外部のオブジェクトが参照するための PK を直接取り出せるようにするため.
+- dense[i] を指しているスロットは、Record が持つ PK の下位ビット (スロット番号) から求める. そのため dense → スロットの逆引き表は持たない.
+  - dense 上の Record の PK は常に正しくなければならない. Record を書き換えるのは Update のみとし、Update は PK を保持する.
 
 ### Record
 
@@ -63,6 +62,10 @@ int freeHead;
   - 値で受け取るため、同じインスタンスを二重に Insert するという問題が起こり得ない.
 - メンバには `readonly` を付ける. `ref readonly` / `in` で受け取ったときの隠れたコピー (defensive copy) を防ぐため.
 - 書き換えは Update 経由のみとする. 索引との食い違いを防ぐため.
+- `[PrimaryKey]` を付けたフィールドを必ず 1 つ持つ. 型は PK の型 (`uint` / `ulong`) と一致させる.
+  - フィールドは利用者が宣言する. 生成コードで追加すると partial struct のフィールドが複数の宣言に分かれ、並び順が定義されなくなるため (CS0282).
+  - PK は Insert で払い出されるまで決まらない. 生成するコンストラクタは PK を引数に取らず、Insert / BulkInsert で払い出した PK を差し込んだコピーを格納する. Insert 時に渡された値は無視する.
+  - Update の引数に PK は含めない.
 - 生成時にフィールドをサイズの降順に並べ、パディングを減らす.
 
 ---
@@ -72,7 +75,7 @@ int freeHead;
 PK は DB 側で払い出す.
 
 ```
-PK = (Gen << SlotBits) | Slot
+PK = (Generation << SlotBits) | Slot
 ```
 
 ### 対応する型
@@ -89,13 +92,13 @@ PK は符号なし整数とする. 符号ビットも世代に使え、`>>` が�
 
 ### 無効値
 
-- 世代は 1 から始める. そのため PK = 0 は払い出されず、`default` の PK がそのまま無効値 (`InvalidPk`) になる.
+- 世代は 1 から始める. そのため PK = 0 は払い出されず、`default` の PK がそのまま無効値 (`InvalidPrimaryKey`) になる.
   - 代入し忘れた PK が、スロット 0 の Record を静かに指す事故を防ぐため.
-- スロットの `Gen = 0` は「未使用 / 使用停止」を表す. 世代 0 の PK は Find で弾くため、どの PK とも一致しない.
+- スロットの `generation = 0` は「未使用 / 使用停止」を表す. 世代 0 の PK は Find で弾くため、どの PK とも一致しない.
 
 ### 世代の一周
 
-- 世代が最大値に達したスロットは、`Gen = 0` にして空きリストに戻さず、使用を止める.
+- 世代が最大値に達したスロットは、`generation = 0` にして空きリストに戻さず、使用を止める.
   - 古いハンドルが、同じスロットを再利用した別の Record を指す事故 (ABA) を防ぐため.
   - 使用を止めたスロットは 1 つにつき 8B を消費し続ける.
 - スロットを使い切った場合、Insert を失敗させる.
@@ -107,27 +110,27 @@ PK は符号なし整数とする. 符号ビットも世代に使え、`>>` が�
 ### Find (PK から Record の解決)
 
 ```csharp
-var gen = pk >> SlotBits;
-var slot = pk & SlotMask;
-if (gen == 0 || slot >= (uint)slotCount) return miss;   // 無効値 / 使用停止との一致を弾く
+var generation = primaryKey >> SlotBits;
+var slot = primaryKey & SlotMask;
+if (generation == 0 || slot >= (uint)slotCount) return miss;   // 無効値 / 使用停止との一致を弾く
 ref var s = ref slots[slot];
-if (s.Gen != gen) return miss;               // 削除済み / 再利用済み
-return ref dense[s.Dense];
+if (s.generation != generation) return miss;               // 削除済み / 再利用済み
+return ref dense[s.dense];
 ```
 
-- 空きスロットの `Gen` は Remove の時点で進めてあるため、削除済みの PK は世代の比較で弾かれる.
+- 空きスロットの `generation` は Remove の時点で進めてあるため、削除済みの PK は世代の比較で弾かれる.
 
 ### Insert
 
-1. 空きリストの先頭からスロットを取る. 無ければ `slotCount` 番目を新しく使い、`Gen = 1` とする.
+1. 空きリストの先頭からスロットを取る. 無ければ `slotCount` 番目を新しく使い、`generation = 1` とする.
    - 直前に空いたスロットから使うため、キャッシュに乗っていることが多い.
-2. `dense[count]` に書き込み、`denseToSlot[count] = slot`、`slots[slot].Dense = count` とする.
-3. PK = `(Gen << SlotBits) | slot` を返す.
+2. 払い出す PK を差し込んだ Record を `dense[count]` に書き込み、`slots[slot].dense = count` とする.
+3. PK = `(generation << SlotBits) | slot` を返す.
 
 ### BulkInsert
 
 - 払い出す PK は連続しないため、PK を書き込む出力先 (Span) を引数で受け取る.
-- `dense` / `denseToSlot` / `slots` を必要な件数分まとめて拡張してから書き込む.
+- `dense` / `slots` を必要な件数分まとめて拡張してから書き込む.
 - 上限を超える場合は何も挿入せずに失敗する.
 
 ### Update
@@ -139,7 +142,7 @@ return ref dense[s.Dense];
 
 1. Find と同様にスロットを確認する. 存在しない / 削除済みの場合は失敗とする.
 2. 対応する二次索引のエントリを削除する.
-3. 末尾の Record (`dense[count - 1]`) を `dense[s.Dense]` に移し、移した Record のスロットの `Dense` を書き換える.
+3. 末尾の Record (`dense[count - 1]`) を `dense[s.dense]` に移し、移した Record のスロットの `dense` を書き換える.
 4. 末尾を `default` で消す (Record が持つ参照を GC に解放させるため).
 5. スロットの世代を進めて空きリストへ戻す (一周した場合は戻さない).
 
@@ -233,16 +236,16 @@ MySQL (InnoDB) の二次索引と同様に、B+Tree のキーを `(SecondaryKey,
 ```csharp
 public sealed class SampleTable
 {
-    public const uint InvalidPk = 0;
+    public const uint InvalidPrimaryKey = 0;
 
-    public bool TryInsert(in SampleRow row, out uint pk);
-    public bool TryBulkInsert(ReadOnlySpan<SampleRow> rows, Span<uint> pks);
+    public bool TryInsert(in SampleRow row, out uint primaryKey);
+    public bool TryBulkInsert(ReadOnlySpan<SampleRow> rows, Span<uint> primaryKeys);
 
-    public bool TryFind(uint pk, out SampleRow row);
-    public ref readonly SampleRow FindRef(uint pk, out bool found);
+    public bool TryFind(uint primaryKey, out SampleRow row);
+    public ref readonly SampleRow FindRef(uint primaryKey, out bool found);
 
-    public bool Update(uint pk, Optional<string> name = default, Optional<string> description = default);
-    public bool Remove(uint pk);
+    public bool Update(uint primaryKey, Optional<string> name = default, Optional<string> description = default);
+    public bool Remove(uint primaryKey);
 
     public AllEnumerable All();
     public bool TryFindFirstByName(string name, out SampleRow row);
@@ -297,10 +300,9 @@ public sealed class SampleTable
 
 | 項目 | 1 件あたり |
 |---|---|
-| Row | Record の大きさ (SampleRow なら 16B, ベンチマークの Row なら 32B) |
-| `denseToSlot` | 4B |
+| Row | Record の大きさ (SampleRow なら 16B, ベンチマークの Row なら 32B). PK のフィールド (4B / 8B) を含む |
 | `slots` | 8B |
-| **合計** | **Row + 12B** + 配列の余り |
+| **合計** | **Row + 8B** + 配列の余り |
 
 二次索引は 1 件あたり、Ordered (int キー) で約 18B (ベンチマークの値).
 
