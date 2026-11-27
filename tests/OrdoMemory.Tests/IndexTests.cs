@@ -243,6 +243,88 @@ namespace OrdoMemory.Tests
             Assert.Equal(2, index.Count);
         }
 
+        [Theory]
+        [InlineData(1)]
+        [InlineData(2)]
+        public void HashMultiIndexLowCardinalityRemove(int seed)
+        {
+            // 値が 2 種類しかないキーで、大量の削除を任意の順で行っても正しく消える
+            const int n = 20000;
+            var random = new Random(seed);
+            var index = new HashMultiIndex<bool, uint>();
+            var expected = new Dictionary<bool, HashSet<uint>> { [false] = new(), [true] = new() };
+            var keys = new bool[n];
+            for (uint pk = 0; pk < n; pk++)
+            {
+                keys[pk] = random.Next(2) == 0;
+                Assert.True(index.Insert(keys[pk], pk));
+                expected[keys[pk]].Add(pk);
+            }
+
+            var order = Enumerable.Range(0, n).Select(i => (uint)i).OrderBy(_ => random.Next()).ToArray();
+            for (var i = 0; i < order.Length; i++)
+            {
+                var pk = order[i];
+                Assert.False(index.Remove(!keys[pk], pk));
+                Assert.True(index.Remove(keys[pk], pk));
+                Assert.False(index.Remove(keys[pk], pk));
+                expected[keys[pk]].Remove(pk);
+
+                if (i % 4000 == 0)
+                {
+                    foreach (var key in new[] { false, true })
+                    {
+                        var actual = new HashSet<uint>();
+                        var e = index.Equal(key);
+                        while (e.MoveNext()) Assert.True(actual.Add(e.Current));
+                        Assert.True(expected[key].SetEquals(actual));
+                    }
+                }
+
+                // 半分消した時点で一部を入れ直す (Update と同じく削除 → 別の値で挿入)
+                if (i == n / 2)
+                {
+                    for (var j = 0; j < 100; j++)
+                    {
+                        var re = order[j];
+                        keys[re] = !keys[re];
+                        Assert.True(index.Insert(keys[re], re));
+                        expected[keys[re]].Add(re);
+                    }
+                }
+            }
+
+            for (var j = 0; j < 100; j++) Assert.True(index.Remove(keys[order[j]], order[j]));
+            Assert.Equal(0, index.Count);
+            Assert.False(index.ContainsKey(false));
+            Assert.False(index.ContainsKey(true));
+        }
+
+        [Fact]
+        public void HashMultiIndexDuplicatePrimaryKey()
+        {
+            var index = new HashMultiIndex<string, uint>();
+            Assert.True(index.Insert("a", 1));
+            Assert.False(index.Insert("b", 1));
+            Assert.False(index.Insert("a", 1));
+            Assert.False(index.ContainsKey("b"));
+            Assert.Equal(1, index.Count);
+
+            // 重複があれば AddRange は何も挿入しない
+            Assert.False(index.AddRange(new[] { "c", "d", "e" }, new uint[] { 2, 3, 1 }));
+            Assert.False(index.ContainsKey("c"));
+            Assert.False(index.ContainsKey("d"));
+            Assert.Equal(1, index.Count);
+
+            Assert.True(index.AddRange(new[] { "c", "c", null }, new uint[] { 2, 3, 4 }));
+            Assert.Equal(4, index.Count);
+            Assert.True(index.Remove("c", 2));
+            Assert.True(index.TryGetFirst("c", out var primaryKey));
+            Assert.Equal(3u, primaryKey);
+            Assert.True(index.Remove(null, 4));
+            Assert.True(index.Insert("b", 4));
+        }
+
         [Fact]
         public void HashUniqueIndex()
         {
