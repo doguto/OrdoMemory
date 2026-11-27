@@ -256,6 +256,52 @@ namespace OrdoMemory.Tests
         }
 
         [Fact]
+        public void SecondaryKeyFindRef()
+        {
+            var table = new ItemTable();
+            table.TryInsert(NewItem(1, "alice", Kind.A, "t1"), out var first);
+            table.TryInsert(NewItem(2, "bob", Kind.B, "t2"), out var second);
+            table.TryInsert(NewItem(3, "bob", Kind.B, "t3"), out _);
+
+            // Unique (Ordered)
+            ref readonly var byCode = ref table.FindRefByCode(2, out var found);
+            Assert.True(found);
+            Assert.Equal(second, byCode.Id);
+            Assert.Equal("bob", byCode.Name);
+
+            ref readonly var missingCode = ref table.FindRefByCode(99, out found);
+            Assert.False(found);
+            Assert.Equal(default(Item).Id, missingCode.Id);
+            Assert.Null(missingCode.Name);
+
+            // Unique (Hash)
+            ref readonly var byTag = ref table.FindRefByTag("t1", out found);
+            Assert.True(found);
+            Assert.Equal(first, byTag.Id);
+            table.FindRefByTag("none", out found);
+            Assert.False(found);
+
+            // 非 Unique は TryFindFirstByXxx と同じ Record を返す
+            Assert.True(table.TryFindFirstByName("bob", out var firstBob));
+            ref readonly var byName = ref table.FindFirstRefByName("bob", out found);
+            Assert.True(found);
+            Assert.Equal(firstBob.Id, byName.Id);
+            table.FindFirstRefByName("carol", out found);
+            Assert.False(found);
+
+            Assert.True(table.TryFindFirstByKind(Kind.B, out var firstB));
+            ref readonly var byKind = ref table.FindFirstRefByKind(Kind.B, out found);
+            Assert.True(found);
+            Assert.Equal(firstB.Id, byKind.Id);
+            table.FindFirstRefByKind(Kind.C, out found);
+            Assert.False(found);
+
+            table.Remove(second);
+            table.FindRefByCode(2, out found);
+            Assert.False(found);
+        }
+
+        [Fact]
         public void ModificationDuringEnumerationThrows()
         {
             var table = new ItemTable();
