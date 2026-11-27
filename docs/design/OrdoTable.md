@@ -190,6 +190,9 @@ SecondaryKey ごとに、属性で種類を選ぶ.
 | long / double | 順序を保つ変換 (double は符号に応じてビット反転). 非 Unique は PK を別に持つ |
 | string | 先頭 4 文字 (UTF-16) を詰めた値. 等しいときだけ `string.CompareOrdinal` を呼ぶ |
 
+- 非 Unique で PK を正規化キーに詰めるのは、正規化キーだけで順序が確定する型 (`NeedsFullComparison` が false) で、かつ正規化キーと PK のビット数の和が 64 以下の場合に限る.
+  - フル比較が必要な型で詰めると、正規化キーが異なる時点で (先頭部分, PK) の順に決まってしまい、キーの順序が崩れるため.
+
 - 削除では木全体の再平衡 (merge-at-half) をしない. 1 回の削除で触るノードを限り、停止時間を O(b) に抑える.
   - 葉: 件数が b/4 以下になったら、同じ親の隣の葉 (左を優先) と合わせて b 件以下なら併合し、超えるなら隣から借りて均す. 触るのは葉 2 枚と親 1 つだけ.
   - 内部ノード: 併合も借り入れもせず、空になったものだけを解放する (free-at-empty). 根の子が 1 つになったら根を外して高さを下げる.
@@ -262,6 +265,8 @@ public sealed class SampleTable
 - 列挙は struct で返す (`foreach (ref readonly var row in table.All())`).
 - 比較子は struct をジェネリクスで受けるか、生成コードに埋め込む (仮想呼び出しを避けるため).
 - 単一スレッド前提とする.
+- 生成コードが使う実装用の型 (`RowStore`, 索引, traits, `KeyConvert`, `KeyComparer` 等) は、生成コードから参照するため public だが、`[EditorBrowsable(EditorBrowsableState.Never)]` を付けて補完に出さない. 利用者が直接使うことは想定しない.
+  - `RowStore` の `Store` / `Remove` / `GetIndex` は前提 (容量の確保、添字の範囲、PK が格納済みであること) を検査し、満たさなければ例外を投げる.
 
 ---
 
