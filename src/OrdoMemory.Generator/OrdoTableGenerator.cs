@@ -32,6 +32,7 @@ namespace OrdoMemory.Generator
             if (tableAttributeType == null || primaryKeyAttributeType == null || keyAttributeType == null) return;
 
             var done = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
+            var hints = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
             foreach (var declaration in receiver.Candidates)
             {
                 var semanticModel = compilation.GetSemanticModel(declaration.SyntaxTree);
@@ -43,9 +44,23 @@ namespace OrdoMemory.Generator
                 var model = TableModel.Create(type, tableAttribute, primaryKeyAttributeType, keyAttributeType, context);
                 if (model == null) continue;
 
-                var hint = type.ToDisplayString().Replace('.', '_') + ".OrdoTable.g.cs";
+                var hint = HintNameOf(type, hints);
                 context.AddSource(hint, SourceText.From(TableEmitter.Emit(model), Encoding.UTF8));
             }
+        }
+
+        // '_' を "__" に、'.' を "_" に置き換えて、A.B_C と A_B.C が同じ名前にならないようにする.
+        // AddSource のヒント名は大文字小文字を区別せずに比べられるため、大文字小文字だけが違う型は連番で区別する.
+        static string HintNameOf(INamedTypeSymbol type, HashSet<string> used)
+        {
+            var name = type.ToDisplayString().Replace("_", "__").Replace('.', '_');
+            var hint = name + ".OrdoTable.g.cs";
+            for (var i = 2; !used.Add(hint); i++)
+            {
+                hint = name + "." + i + ".OrdoTable.g.cs";
+            }
+
+            return hint;
         }
 
         sealed class Receiver : ISyntaxReceiver
