@@ -113,27 +113,22 @@ namespace OrdoMemory.Generator.Emitting
             var uniqueKeyIndices = keyIndices.Where(keyIndex => model.Keys[keyIndex].Unique).ToList();
             var multiKeyIndices = keyIndices.Where(keyIndex => !model.Keys[keyIndex].Unique).ToList();
 
-            // Unique な索引は、払い出す予定の主キーで先に挿入し、Insert の戻り値で重複を検出する (探索は 1 回で済む)
-            // 失敗した場合は、それまでに挿入した索引を取り消してから失敗を返す
-            var reserve = uniqueKeyIndices.Count == 0
-                ? Render($$"""
-                           if (!__store.TryReserve(1))
-                           {
-                               primaryKey = InvalidPrimaryKey;
-                               return false;
-                           }
-                           """)
-                : Render($$"""
-                           var __nextPrimaryKey = __store.PeekNextPrimaryKey();
-                           {{Each(uniqueKeyIndices, keyIndex => $"var __key{keyIndex} = {ConvertKey(model.Keys[keyIndex], "row." + model.Keys[keyIndex].Field.Name)};")}}
-                           {{Each(Enumerable.Range(0, uniqueKeyIndices.Count), i => EmitInsertUniqueIndex(model, uniqueKeyIndices, i))}}
-                           if (!__store.TryReserve(1))
-                           {
-                               {{EmitRollbackUniqueIndexes(model, uniqueKeyIndices, uniqueKeyIndices.Count, "__key", "__nextPrimaryKey")}}
-                               primaryKey = InvalidPrimaryKey;
-                               return false;
-                           }
-                           """);
+            // 先に容量を確保する. TryReserve は次に払い出す主キーを変えないため、確保後に読んだ NextPrimaryKey が Store で払い出される.
+            // Unique な索引には、その主キーで Store より先に挿入し、Insert の戻り値で重複を検出する (探索は 1 回で済む).
+            // 重複した場合は、それまでに挿入した索引を取り消してから失敗を返す
+            var reserve = Render($$"""
+                                   if (!__store.TryReserve(1))
+                                   {
+                                       primaryKey = InvalidPrimaryKey;
+                                       return false;
+                                   }
+                                   {{If(uniqueKeyIndices.Count > 0, Render($$"""
+
+                                                                              var __nextPrimaryKey = __store.NextPrimaryKey;
+                                                                              {{Each(uniqueKeyIndices, keyIndex => $"var __key{keyIndex} = {ConvertKey(model.Keys[keyIndex], "row." + model.Keys[keyIndex].Field.Name)};")}}
+                                                                              {{Each(Enumerable.Range(0, uniqueKeyIndices.Count), i => EmitInsertUniqueIndex(model, uniqueKeyIndices, i))}}
+                                                                              """))}}
+                                   """);
 
             return Render($$"""
                             public bool TryInsert(in {{model.RowFullName}} row, out {{model.PrimaryKeyType}} primaryKey)

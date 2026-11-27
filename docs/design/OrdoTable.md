@@ -128,9 +128,10 @@ return ref dense[s.dense];
 3. PK = `(generation << SlotBits) | slot` を返す.
 
 - Unique な SecondaryKey を持つ場合、重複の確認と挿入で索引を 2 回探索しないよう、次の順に行う.
-  1. 次に払い出す PK を、状態を変えずに求める (`RowStore.PeekNextPrimaryKey`).
-  2. その PK で Unique な索引へ挿入し、`Insert` の戻り値で重複を検出する. 重複した場合は、それまでに挿入した索引から取り除いて失敗とする.
-  3. 容量を確保できない場合も、挿入した索引から取り除いて失敗とする.
+  1. 容量を確保する (`TryReserve`). 確保できなければ失敗とする.
+  2. 次に払い出す PK を、状態を変えずに求める (`RowStore.NextPrimaryKey`). `TryReserve` はこの値を変えない.
+  3. その PK で Unique な索引へ挿入し、`Insert` の戻り値で重複を検出する. 重複した場合は、それまでに挿入した索引から取り除いて失敗とする.
+     - 重複で失敗した場合も 1 の容量確保 (配列の拡張) は残るが、件数・内容は変わらない.
   4. Record を書き込み (上記 1〜3)、非 Unique な索引へ挿入する.
 - 失敗した場合、Record・索引・version はいずれも変わらない.
 
