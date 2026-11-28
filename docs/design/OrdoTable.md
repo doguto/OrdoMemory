@@ -248,9 +248,7 @@ MySQL (InnoDB) の二次索引と同様に、B+Tree のキーを `(SecondaryKey,
 
 - Unique: `Dictionary<TKey, uint>`.
 - 非 Unique: 値ごとに PK の配列を持つ. PK は単調増加しないため配列は順序を持たず、削除は末尾との入れ替えとする.
-  - PK から配列の中での位置を引く `Dictionary<PK, int>` を別に持ち、削除で配列を探さない. 値の種類が少ないキー (bool, enum 等) でも削除は平均 O(1).
-  - 1 つの PK は索引の中で 1 つの値にしか属さない (Record は値を 1 つだけ持つ). 既にある PK の Insert は失敗とし、AddRange はその場合に何も挿入しない.
-  - `FindAllByXxx` の列挙順は保証しない (削除のたびに末尾の PK が移る).
+  - PK → 配列内の位置 (`Dictionary<PK, int>`) を持ち、削除は平均 O(1). 既にある PK の Insert は失敗する.
 
 ### 将来の候補: Bitmap
 
@@ -342,7 +340,6 @@ public sealed class SampleTable
 
 - Ordered: ノードの大きさ B は定数 (64). 高さ log_B n, ノード内の探索とずらしが O(B) で、合わせて O(log n). ノードの分割は償却 O(1).
 - Hash: 最悪は衝突が偏った場合の O(n).
-- 非 Unique の Hash 索引は、PK 配列の中での位置を別に持つため、値の件数 p に依らず削除は O(1).
 
 ---
 
@@ -355,13 +352,13 @@ public sealed class SampleTable
 | **合計** | **Row + 8B** + 配列の余り |
 
 二次索引は 1 件あたり、Ordered (int キー) で約 18B (ベンチマークの値).
-非 Unique の Hash 索引は、PK 配列の分に加えて位置の逆引き (`Dictionary<PK, int>`) で 1 件あたり約 20B (uint の PK) / 約 28B (ulong の PK) を使う.
+非 Unique の Hash 索引は、位置の逆引きで 1 件あたり約 20B (uint) / 28B (ulong) 増える.
 
 ---
 
 ## 未決事項
 
-1. ~~非 Unique の Hash 索引で、PK 配列の中での位置を持つか (削除 O(1) とメモリの交換).~~ → 持つ. 値の種類が少ないキーで全件削除が O(n²) になり (8 万件で約 3.4 秒)、実用上問題になったため (#16).
+1. ~~非 Unique の Hash 索引で、PK 配列の中での位置を持つか (削除 O(1) とメモリの交換).~~ → 持つ (#16).
 2. アリーナ B+Tree のメモリ対策. string キーでは class ノード版の約 2 倍 (44 vs 23 B/件) のため、配列をチャンク単位で伸ばす方式と、string で正規化キーを持たない方式を比べる.
 3. 二次索引の再計測. ベンチマークは PK が単調増加する前提で測っているため、ハンドル (単調増加しない) で測り直す.
 4. Unity の IL2CPP と Mono (Boehm GC) での計測.

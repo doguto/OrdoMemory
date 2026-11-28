@@ -532,7 +532,6 @@ namespace OrdoMemory.Tests
         [InlineData(2)]
         public void HashMultiIndexLowCardinalityRemove(int seed)
         {
-            // 値が 2 種類しかないキーで、大量の削除を任意の順で行っても正しく消える
             const int n = 20000;
             var random = new Random(seed);
             var index = new HashMultiIndex<bool, uint>();
@@ -565,7 +564,6 @@ namespace OrdoMemory.Tests
                     }
                 }
 
-                // 半分消した時点で一部を入れ直す (Update と同じく削除 → 別の値で挿入)
                 if (i == n / 2)
                 {
                     for (var j = 0; j < 100; j++)
@@ -594,7 +592,6 @@ namespace OrdoMemory.Tests
             Assert.False(index.ContainsKey("b"));
             Assert.Equal(1, index.Count);
 
-            // 重複があれば AddRange は何も挿入しない
             Assert.False(index.AddRange(new[] { "c", "d", "e" }, new uint[] { 2, 3, 1 }));
             Assert.False(index.ContainsKey("c"));
             Assert.False(index.ContainsKey("d"));

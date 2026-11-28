@@ -109,8 +109,6 @@ namespace OrdoMemory
 
         readonly Dictionary<TKey, int> map = new(KeyComparer<TKey>.Default);
 
-        // PK から、その PK が入っている PK 配列の中での位置への逆引き. 削除で配列を探さずに済ませるため
-        // 1 つの PK は索引の中で 1 つの値にしか属さない (Record は値を 1 つだけ持つ) 前提
         readonly Dictionary<TPrimaryKey, int> positions = new();
         int nullPosting = -1;
 
@@ -146,7 +144,6 @@ namespace OrdoMemory
             return id < 0 ? default : new Enumerator(postings[id], lengths[id]);
         }
 
-        // 同じ PK が既に索引にある場合は挿入せずに false を返す
         public bool Insert(TKey key, TPrimaryKey primaryKey)
         {
             var id = Find(key);
@@ -184,13 +181,11 @@ namespace OrdoMemory
             var id = Find(key);
             if (id < 0) return false;
 
-            // 逆引きした位置にその PK があれば、この値に属している
             if (!positions.TryGetValue(primaryKey, out var i)) return false;
             var list = postings[id];
             var last = lengths[id] - 1;
             if (i > last || !EqualityComparer<TPrimaryKey>.Default.Equals(list[i], primaryKey)) return false;
 
-            // 末尾との入れ替えで消し、移した PK の位置を書き換える
             if (i != last)
             {
                 var moved = list[last];
@@ -227,7 +222,6 @@ namespace OrdoMemory
             {
                 if (Insert(keys[i], primaryKeys[i])) continue;
 
-                // 重複した PK があれば、この呼び出しで挿入した分を戻す
                 for (var j = 0; j < i; j++)
                 {
                     Remove(keys[j], primaryKeys[j]);
