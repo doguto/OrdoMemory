@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
 namespace OrdoMemory
 {
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public interface IOrderedKeyTraits<TKey>
     {
         int NormalizedBits { get; }
@@ -15,6 +17,7 @@ namespace OrdoMemory
         int CompareFull(TKey a, TKey b);
     }
 
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public readonly struct Int32Key : IOrderedKeyTraits<int>
     {
         public int NormalizedBits => 32;
@@ -32,6 +35,7 @@ namespace OrdoMemory
         }
     }
 
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public readonly struct Int64Key : IOrderedKeyTraits<long>
     {
         public int NormalizedBits => 64;
@@ -49,6 +53,7 @@ namespace OrdoMemory
         }
     }
 
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public readonly struct UInt64Key : IOrderedKeyTraits<ulong>
     {
         public int NormalizedBits => 64;
@@ -66,6 +71,7 @@ namespace OrdoMemory
         }
     }
 
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public readonly struct DoubleKey : IOrderedKeyTraits<double>
     {
         const ulong SignBit = 1UL << 63;
@@ -86,6 +92,7 @@ namespace OrdoMemory
         }
     }
 
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public readonly struct StringKey : IOrderedKeyTraits<string>
     {
         public int NormalizedBits => 64;
@@ -112,6 +119,7 @@ namespace OrdoMemory
         }
     }
 
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public static class KeyConvert
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -122,6 +130,7 @@ namespace OrdoMemory
         }
     }
 
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public static class KeyComparer<TKey>
     {
         public static readonly IEqualityComparer<TKey> Default = typeof(TKey) == typeof(string)

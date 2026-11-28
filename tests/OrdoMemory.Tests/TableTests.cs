@@ -16,7 +16,7 @@ namespace OrdoMemory.Tests
         public void InsertFindRemove()
         {
             var table = new ItemTable();
-            Assert.True(table.TryInsert(NewItem(1, "alice"), out var primaryKey));
+            Assert.Equal(InsertResult.Success, table.TryInsert(NewItem(1, "alice"), out var primaryKey));
             Assert.NotEqual(ItemTable.InvalidPrimaryKey, primaryKey);
 
             Assert.True(table.TryFind(primaryKey, out var row));
@@ -38,8 +38,8 @@ namespace OrdoMemory.Tests
         public void RowHoldsPrimaryKey()
         {
             var table = new ItemTable();
-            Assert.True(table.TryInsert(NewItem(1), out var first));
-            Assert.True(table.TryInsert(NewItem(2), out var second));
+            Assert.Equal(InsertResult.Success, table.TryInsert(NewItem(1), out var first));
+            Assert.Equal(InsertResult.Success, table.TryInsert(NewItem(2), out var second));
             Assert.True(table.TryFind(first, out var row));
             Assert.Equal(first, row.Id);
 
@@ -64,7 +64,7 @@ namespace OrdoMemory.Tests
             var table = new ItemTable();
             var rows = Enumerable.Range(0, 10).Select(i => NewItem(i)).ToArray();
             var primaryKeys = new uint[rows.Length];
-            Assert.True(table.TryBulkInsert(rows, primaryKeys));
+            Assert.Equal(InsertResult.Success, table.TryBulkInsert(rows, primaryKeys));
 
             for (var i = 0; i < rows.Length; i++)
             {
@@ -131,11 +131,11 @@ namespace OrdoMemory.Tests
         public void UniqueConstraint()
         {
             var table = new ItemTable();
-            Assert.True(table.TryInsert(NewItem(1, tag: "x"), out var a));
-            Assert.False(table.TryInsert(NewItem(1, tag: "y"), out var dup));
+            Assert.Equal(InsertResult.Success, table.TryInsert(NewItem(1, tag: "x"), out var a));
+            Assert.NotEqual(InsertResult.Success, table.TryInsert(NewItem(1, tag: "y"), out var dup));
             Assert.Equal(ItemTable.InvalidPrimaryKey, dup);
-            Assert.False(table.TryInsert(NewItem(2, tag: "x"), out _));
-            Assert.True(table.TryInsert(NewItem(2, tag: "y"), out var b));
+            Assert.NotEqual(InsertResult.Success, table.TryInsert(NewItem(2, tag: "x"), out _));
+            Assert.Equal(InsertResult.Success, table.TryInsert(NewItem(2, tag: "y"), out var b));
 
             Assert.False(table.Update(b, 1));
             Assert.True(table.TryFind(b, out var row));
@@ -149,6 +149,76 @@ namespace OrdoMemory.Tests
             Assert.True(table.TryFindByTag("z", out _));
             Assert.False(table.TryFindByTag("y", out _));
             Assert.Equal(2, table.Count);
+        }
+
+        [Fact]
+        public void InsertRollsBackEarlierUniqueIndexOnLaterConflict()
+        {
+            var table = new ItemTable();
+            Assert.Equal(InsertResult.Success, table.TryInsert(NewItem(1, tag: "x"), out var a));
+
+            // Code (1 つ目の Unique 索引) は挿入できるが、Tag (2 つ目) が重複する
+            var enumerator = table.All().GetEnumerator();
+            Assert.NotEqual(InsertResult.Success, table.TryInsert(NewItem(2, tag: "x"), out var dup));
+            Assert.Equal(ItemTable.InvalidPrimaryKey, dup);
+            Assert.True(enumerator.MoveNext());
+
+            Assert.Equal(1, table.Count);
+            Assert.False(table.TryFindByCode(2, out _));
+            Assert.True(table.TryFindPrimaryKeyByTag("x", out var tagged));
+            Assert.Equal(a, tagged);
+            Assert.Equal(1, CountRange(table));
+
+            Assert.Equal(InsertResult.Success, table.TryInsert(NewItem(2, tag: "y"), out var b));
+            Assert.True(table.TryFindPrimaryKeyByCode(2, out var coded));
+            Assert.Equal(b, coded);
+            Assert.Equal(2, table.Count);
+        }
+
+        [Fact]
+        public void UpdateRollsBackEarlierUniqueIndexOnLaterConflict()
+        {
+            var table = new ItemTable();
+            Assert.Equal(InsertResult.Success, table.TryInsert(NewItem(1, "a", tag: "x"), out var a));
+            Assert.Equal(InsertResult.Success, table.TryInsert(NewItem(2, "b", tag: "y"), out var b));
+
+            // Code (1 つ目の Unique 索引) の変更後の値は空いているが、Tag (2 つ目) が重複する
+            var enumerator = table.All().GetEnumerator();
+            Assert.False(table.Update(b, 3, "c", tag: "x"));
+            Assert.True(enumerator.MoveNext());
+
+            Assert.True(table.TryFind(b, out var row));
+            Assert.Equal(2, row.Code);
+            Assert.Equal("b", row.Name);
+            Assert.Equal("y", row.Tag);
+            Assert.False(table.TryFindByCode(3, out _));
+            Assert.True(table.TryFindPrimaryKeyByCode(2, out var coded));
+            Assert.Equal(b, coded);
+            Assert.True(table.TryFindPrimaryKeyByTag("x", out var tagged));
+            Assert.Equal(a, tagged);
+            Assert.True(table.TryFindPrimaryKeyByTag("y", out tagged));
+            Assert.Equal(b, tagged);
+            Assert.False(table.TryFindFirstByName("c", out _));
+            Assert.Equal(2, CountRange(table));
+
+            // 1 つ目が重複する場合も何も変わらない
+            Assert.False(table.Update(b, 1, tag: "z"));
+            Assert.False(table.TryFindByTag("z", out _));
+            Assert.True(table.TryFindPrimaryKeyByTag("y", out tagged));
+            Assert.Equal(b, tagged);
+
+            Assert.True(table.Update(b, 3, tag: "z"));
+            Assert.True(table.TryFindPrimaryKeyByCode(3, out coded));
+            Assert.Equal(b, coded);
+            Assert.False(table.TryFindByCode(2, out _));
+            Assert.False(table.TryFindByTag("y", out _));
+        }
+
+        static int CountRange(ItemTable table)
+        {
+            var n = 0;
+            foreach (ref readonly var _ in table.FindRangeByCode(int.MinValue, int.MaxValue)) n++;
+            return n;
         }
 
         [Fact]
@@ -169,6 +239,45 @@ namespace OrdoMemory.Tests
             Assert.True(table.TryFindFirstByName("b", out _));
             Assert.Equal(0, CountKind(table, Kind.B));
             Assert.Equal(1, CountKind(table, Kind.C));
+        }
+
+        [Fact]
+        public void UpdateIgnoresUserConstructorParameterOrder()
+        {
+            var table = new SwapRowTable();
+            Assert.Equal(InsertResult.Success, table.TryInsert(new SwapRow(b: 2, a: 1), out var primaryKey));
+
+            Assert.True(table.Update(primaryKey, a: 10));
+
+            Assert.True(table.TryFind(primaryKey, out var row));
+            Assert.Equal(primaryKey, row.Id);
+            Assert.Equal(10, row.A);
+            Assert.Equal(2, row.B);
+            Assert.False(table.TryFindFirstByA(1, out _));
+            Assert.True(table.TryFindFirstByA(10, out _));
+            Assert.False(table.TryFindFirstByA(2, out _));
+        }
+
+        [Fact]
+        public void UpdateOfMutableRowIgnoresUserConstructorParameterOrder()
+        {
+            var table = new MutableSwapRowTable();
+            Assert.Equal(InsertResult.Success, table.TryInsert(new MutableSwapRow(b: 2, a: 1), out var primaryKey));
+
+            // readonly の A が変わるため Record 全体を作り直す
+            Assert.True(table.Update(primaryKey, a: 10));
+            Assert.True(table.TryFind(primaryKey, out var row));
+            Assert.Equal(primaryKey, row.Id);
+            Assert.Equal(10, row.A);
+            Assert.Equal(2, row.B);
+
+            // B はその場で書き込む
+            Assert.True(table.Update(primaryKey, b: 5));
+            Assert.True(table.TryFind(primaryKey, out row));
+            Assert.Equal(10, row.A);
+            Assert.Equal(5, row.B);
+            Assert.True(table.TryFindFirstByA(10, out _));
+            Assert.False(table.TryFindFirstByA(1, out _));
         }
 
         static int CountKind(ItemTable table, Kind kind)
@@ -217,6 +326,52 @@ namespace OrdoMemory.Tests
         }
 
         [Fact]
+        public void SecondaryKeyFindRef()
+        {
+            var table = new ItemTable();
+            table.TryInsert(NewItem(1, "alice", Kind.A, "t1"), out var first);
+            table.TryInsert(NewItem(2, "bob", Kind.B, "t2"), out var second);
+            table.TryInsert(NewItem(3, "bob", Kind.B, "t3"), out _);
+
+            // Unique (Ordered)
+            ref readonly var byCode = ref table.FindRefByCode(2, out var found);
+            Assert.True(found);
+            Assert.Equal(second, byCode.Id);
+            Assert.Equal("bob", byCode.Name);
+
+            ref readonly var missingCode = ref table.FindRefByCode(99, out found);
+            Assert.False(found);
+            Assert.Equal(default(Item).Id, missingCode.Id);
+            Assert.Null(missingCode.Name);
+
+            // Unique (Hash)
+            ref readonly var byTag = ref table.FindRefByTag("t1", out found);
+            Assert.True(found);
+            Assert.Equal(first, byTag.Id);
+            table.FindRefByTag("none", out found);
+            Assert.False(found);
+
+            // 非 Unique は TryFindFirstByXxx と同じ Record を返す
+            Assert.True(table.TryFindFirstByName("bob", out var firstBob));
+            ref readonly var byName = ref table.FindFirstRefByName("bob", out found);
+            Assert.True(found);
+            Assert.Equal(firstBob.Id, byName.Id);
+            table.FindFirstRefByName("carol", out found);
+            Assert.False(found);
+
+            Assert.True(table.TryFindFirstByKind(Kind.B, out var firstB));
+            ref readonly var byKind = ref table.FindFirstRefByKind(Kind.B, out found);
+            Assert.True(found);
+            Assert.Equal(firstB.Id, byKind.Id);
+            table.FindFirstRefByKind(Kind.C, out found);
+            Assert.False(found);
+
+            table.Remove(second);
+            table.FindRefByCode(2, out found);
+            Assert.False(found);
+        }
+
+        [Fact]
         public void ModificationDuringEnumerationThrows()
         {
             var table = new ItemTable();
@@ -243,12 +398,12 @@ namespace OrdoMemory.Tests
             var table = new ItemTable();
             var rows = Enumerable.Range(0, 1000).Select(i => NewItem(i * 2, "n" + i % 17, (Kind)(i % 3), score: i)).ToArray();
             var primaryKeys = new uint[rows.Length];
-            Assert.True(table.TryBulkInsert(rows, primaryKeys));
+            Assert.Equal(InsertResult.Success, table.TryBulkInsert(rows, primaryKeys));
             Assert.Equal(1000, table.Count);
 
             var small = Enumerable.Range(0, 10).Select(i => NewItem(i * 2 + 1)).ToArray();
             var smallPrimaryKeys = new uint[10];
-            Assert.True(table.TryBulkInsert(small, smallPrimaryKeys));
+            Assert.Equal(InsertResult.Success, table.TryBulkInsert(small, smallPrimaryKeys));
             Assert.Equal(1010, table.Count);
 
             var codes = new List<int>();
@@ -272,10 +427,10 @@ namespace OrdoMemory.Tests
             }
 
             var conflict = new[] { NewItem(1000), NewItem(5, tag: "fresh") };
-            Assert.False(table.TryBulkInsert(conflict, new uint[2]));
+            Assert.NotEqual(InsertResult.Success, table.TryBulkInsert(conflict, new uint[2]));
 
             var batch = Enumerable.Range(0, 200).Select(i => NewItem(2000 + i, tag: i == 150 ? "dup" : i == 10 ? "dup" : null)).ToArray();
-            Assert.False(table.TryBulkInsert(batch, new uint[200]));
+            Assert.NotEqual(InsertResult.Success, table.TryBulkInsert(batch, new uint[200]));
 
             Assert.Equal(100, table.Count);
             Assert.False(table.TryFindByCode(1000, out _));
@@ -293,9 +448,9 @@ namespace OrdoMemory.Tests
         public void GenerationWrapRetiresSlot()
         {
             var table = new OneGenRowTable();
-            Assert.True(table.TryInsert(new OneGenRow(1), out var a));
+            Assert.Equal(InsertResult.Success, table.TryInsert(new OneGenRow(1), out var a));
             Assert.True(table.Remove(a));
-            Assert.True(table.TryInsert(new OneGenRow(2), out var b));
+            Assert.Equal(InsertResult.Success, table.TryInsert(new OneGenRow(2), out var b));
             Assert.NotEqual(a & ((1u << OneGenRowTable.SlotBits) - 1), b & ((1u << OneGenRowTable.SlotBits) - 1));
             Assert.False(table.Contains(a));
         }
@@ -306,21 +461,74 @@ namespace OrdoMemory.Tests
             var table = new TinyRowTable();
             for (var i = 0; i < 4; i++)
             {
-                Assert.True(table.TryInsert(new TinyRow(i), out _));
+                Assert.Equal(InsertResult.Success, table.TryInsert(new TinyRow(i), out _));
             }
 
-            Assert.False(table.TryInsert(new TinyRow(9), out _));
-            Assert.False(table.TryBulkInsert(new[] { new TinyRow(10) }, new uint[1]));
+            Assert.NotEqual(InsertResult.Success, table.TryInsert(new TinyRow(9), out _));
+            Assert.False(table.TryFindByValue(9, out _));
+            Assert.NotEqual(InsertResult.Success, table.TryBulkInsert(new[] { new TinyRow(10) }, new uint[1]));
             Assert.Equal(4, table.Count);
+        }
+
+        [Fact]
+        public void InsertResultDistinguishesFailureReasons()
+        {
+            var table = new TinyRowTable();
+            Assert.Equal(InsertResult.Success, table.TryInsert(new TinyRow(0), out var primaryKey));
+            Assert.NotEqual(TinyRowTable.InvalidPrimaryKey, primaryKey);
+
+            Assert.Equal(InsertResult.Duplicate, table.TryInsert(new TinyRow(0), out primaryKey));
+            Assert.Equal(TinyRowTable.InvalidPrimaryKey, primaryKey);
+
+            for (var i = 1; i < 4; i++)
+            {
+                Assert.Equal(InsertResult.Success, table.TryInsert(new TinyRow(i), out _));
+            }
+
+            Assert.Equal(InsertResult.Full, table.TryInsert(new TinyRow(9), out primaryKey));
+            Assert.Equal(TinyRowTable.InvalidPrimaryKey, primaryKey);
+
+            // 重複と容量枯渇が同時に起きる場合は、容量を先に確保するため Full を返す
+            Assert.Equal(InsertResult.Full, table.TryInsert(new TinyRow(0), out _));
+            Assert.Equal(4, table.Count);
+        }
+
+        [Fact]
+        public void BulkInsertResultDistinguishesFailureReasons()
+        {
+            var table = new TinyRowTable();
+            var primaryKeys = new uint[4];
+            Assert.Equal(InsertResult.Success, table.TryBulkInsert(Array.Empty<TinyRow>(), primaryKeys));
+
+            Assert.Equal(InsertResult.Success, table.TryBulkInsert(new[] { new TinyRow(0), new TinyRow(1) }, primaryKeys));
+
+            Assert.Equal(InsertResult.Duplicate, table.TryBulkInsert(new[] { new TinyRow(2), new TinyRow(0) }, primaryKeys));
+
+            Assert.Equal(InsertResult.Duplicate, table.TryBulkInsert(new[] { new TinyRow(2), new TinyRow(2) }, primaryKeys));
+            Assert.Equal(2, table.Count);
+
+            Assert.Equal(InsertResult.Full, table.TryBulkInsert(new[] { new TinyRow(2), new TinyRow(3), new TinyRow(4) }, primaryKeys));
+            Assert.Equal(2, table.Count);
+
+            Assert.Equal(InsertResult.Success, table.TryBulkInsert(new[] { new TinyRow(2), new TinyRow(3) }, primaryKeys));
+            Assert.Equal(4, table.Count);
+        }
+
+        [Fact]
+        public void InsertResultWithoutUniqueKeys()
+        {
+            var table = new OneGenRowTable();
+            Assert.Equal(InsertResult.Success, table.TryInsert(new OneGenRow(1), out _));
+            Assert.Equal(InsertResult.Success, table.TryInsert(new OneGenRow(1), out _));
         }
 
         [Fact]
         public void UInt64PrimaryKey()
         {
             var table = new BigTable();
-            Assert.True(table.TryInsert(new BigRow(5, 1), out var a));
-            Assert.True(table.TryInsert(new BigRow(5, 2), out var b));
-            Assert.True(table.TryInsert(new BigRow(long.MinValue, 3), out _));
+            Assert.Equal(InsertResult.Success, table.TryInsert(new BigRow(5, 1), out var a));
+            Assert.Equal(InsertResult.Success, table.TryInsert(new BigRow(5, 2), out var b));
+            Assert.Equal(InsertResult.Success, table.TryInsert(new BigRow(long.MinValue, 3), out _));
             Assert.Equal(1UL << 32, a & ~0xFFFFFFFFUL);
 
             var primaryKeys = new List<ulong>();
@@ -362,7 +570,7 @@ namespace OrdoMemory.Tests
             var n = 0;
             foreach (ref readonly var _ in table.FindAllByName("n1")) n++;
             Assert.Equal(5, n);
-            Assert.True(table.TryInsert(NewItem(1000), out _));
+            Assert.Equal(InsertResult.Success, table.TryInsert(NewItem(1000), out _));
         }
 
         [Fact]
@@ -391,6 +599,124 @@ namespace OrdoMemory.Tests
             Run();
             Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
             Assert.NotEqual(0, sum);
+        }
+
+        [Fact]
+        public void UpdateWritesMutableFieldsInPlace()
+        {
+            var table = new CharacterTable();
+            Assert.Equal(InsertResult.Success, table.TryInsert(new Character(10, 1, "g", 100, "a"), out var first));
+            Assert.Equal(InsertResult.Success, table.TryInsert(new Character(20, 1, "g", 50, "b"), out var second));
+
+            Assert.True(table.Update(first, hp: 70));
+            ref readonly var row = ref table.FindRef(first, out _);
+            Assert.Equal(70, row.Hp);
+            Assert.Equal("a", row.Note);
+            Assert.Equal(first, row.Id);
+            Assert.Equal(10, row.Code);
+
+            // 値が同じキーを指定しても、索引は付け替えない
+            Assert.True(table.Update(first, code: 10, team: 1, note: "hit"));
+            row = ref table.FindRef(first, out _);
+            Assert.Equal(70, row.Hp);
+            Assert.Equal("hit", row.Note);
+
+            Assert.Equal(50, table.FindRef(second, out _).Hp);
+            Assert.True(table.TryFindByCode(10, out var byCode));
+            Assert.Equal("hit", byCode.Note);
+            Assert.Equal(2, CountTeam(table, 1));
+        }
+
+        [Fact]
+        public void UpdateChangesKeysAndMutableFieldsTogether()
+        {
+            var table = new CharacterTable();
+            Assert.Equal(InsertResult.Success, table.TryInsert(new Character(10, 1, "g", 100, "a"), out var primaryKey));
+            Assert.Equal(InsertResult.Success, table.TryInsert(new Character(20, 2, "g", 100, "b"), out _));
+
+            Assert.True(table.Update(primaryKey, code: 11, team: 2, hp: 5));
+            Assert.False(table.TryFindByCode(10, out _));
+            Assert.True(table.TryFindByCode(11, out var row));
+            Assert.Equal(primaryKey, row.Id);
+            Assert.Equal(5, row.Hp);
+            Assert.Equal("a", row.Note);
+            Assert.Equal(0, CountTeam(table, 1));
+            Assert.Equal(2, CountTeam(table, 2));
+
+            // Unique 制約に違反する場合は、他のフィールドも書き換えない
+            Assert.False(table.Update(primaryKey, code: 20, hp: 999));
+            Assert.Equal(5, table.FindRef(primaryKey, out _).Hp);
+        }
+
+        [Fact]
+        public void UpdateMutableSecondaryKeyInPlace()
+        {
+            var table = new CharacterTable();
+            Assert.Equal(InsertResult.Success, table.TryInsert(new Character(10, 1, "g", 100, "a"), out var primaryKey));
+            Assert.Equal(InsertResult.Success, table.TryInsert(new Character(20, 1, "g", 100, "b"), out _));
+
+            // readonly でない SecondaryKey (FK) の変更は、索引を付け替えてその場で書き込む
+            Assert.True(table.Update(primaryKey, team: 2, group: "h", hp: 1));
+            ref readonly var row = ref table.FindRef(primaryKey, out _);
+            Assert.Equal(2, row.Team);
+            Assert.Equal("h", row.Group);
+            Assert.Equal(1, row.Hp);
+            Assert.Equal(10, row.Code);
+            Assert.Equal(1, CountTeam(table, 1));
+            Assert.Equal(1, CountTeam(table, 2));
+            Assert.True(table.TryFindFirstByGroup("h", out var byGroup));
+            Assert.Equal(primaryKey, byGroup.Id);
+            Assert.True(table.TryFindFirstByGroup("g", out var other));
+            Assert.NotEqual(primaryKey, other.Id);
+
+            // 索引の構造が変わるため、列挙中の FK の変更は例外になる
+            Assert.Throws<InvalidOperationException>(() =>
+            {
+                foreach (ref readonly var _ in table.All()) table.Update(primaryKey, team: 3);
+            });
+        }
+
+        [Fact]
+        public void UpdateMutableFieldsDuringEnumeration()
+        {
+            var table = new CharacterTable();
+            for (var i = 0; i < 10; i++) table.TryInsert(new Character(i, i % 2, "g", i, null), out _);
+
+            // キーが変わらない Update は構造を変えないため、列挙中でも行える
+            foreach (ref readonly var row in table.All()) table.Update(row.Id, hp: row.Hp + 100);
+
+            foreach (ref readonly var row in table.All()) Assert.Equal(row.Code + 100, row.Hp);
+        }
+
+        [Fact]
+        public void UpdateMissingPrimaryKey()
+        {
+            var table = new CharacterTable();
+            Assert.Equal(InsertResult.Success, table.TryInsert(new Character(10, 1, "g", 100, "a"), out var primaryKey));
+            Assert.True(table.Remove(primaryKey));
+            Assert.False(table.Update(primaryKey, hp: 1));
+            Assert.False(table.Update(CharacterTable.InvalidPrimaryKey, hp: 1));
+        }
+
+        static int CountTeam(CharacterTable table, int team)
+        {
+            var n = 0;
+            foreach (ref readonly var _ in table.FindAllByTeam(team)) n++;
+            return n;
+        }
+
+        [Fact]
+        public void HintNamesDoNotCollide()
+        {
+            var a = new HintName.A_BTable();
+            var b = new HintName_A.BTable();
+            var upper = new HintName.CaseRowTable();
+            var lower = new HintName.caseRowTable();
+            Assert.Equal(InsertResult.Success, a.TryInsert(new HintName.A_B(1), out _));
+            Assert.Equal(InsertResult.Success, b.TryInsert(new HintName_A.B(2), out _));
+            Assert.Equal(InsertResult.Success, upper.TryInsert(new HintName.CaseRow(3), out _));
+            Assert.Equal(InsertResult.Success, lower.TryInsert(new HintName.caseRow(4), out _));
+            Assert.Equal(1, a.Count + b.Count - upper.Count - lower.Count + 1);
         }
     }
 }
