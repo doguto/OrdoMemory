@@ -125,10 +125,10 @@ namespace OrdoMemory
         int nullPosting = -1;
 
         TPrimaryKey[][] postings = new TPrimaryKey[4][];
-
         int[] lengths = new int[4];
         int postingUsed;
-        int postingFree = -1;
+        int[] freeIds = new int[4];
+        int freeCount;
         int count;
 
         public int Count => count;
@@ -243,25 +243,24 @@ namespace OrdoMemory
         {
             map.Clear();
             nullPosting = -1;
-            Array.Clear(postings, 0, postingUsed);
+            for (var id = 0; id < postingUsed; id++)
+            {
+                if (postings[id] != null && postings[id].Length > MaxPooledPostingLength) postings[id] = null;
+            }
+
             postingUsed = 0;
-            postingFree = -1;
+            freeCount = 0;
             count = 0;
         }
 
         public void TrimExcess()
         {
             map.TrimExcess();
+            for (var i = 0; i < freeCount; i++) postings[freeIds[i]] = null;
+            Array.Clear(postings, postingUsed, postings.Length - postingUsed);
             for (var id = 0; id < postingUsed; id++)
             {
-                var length = lengths[id];
-                if (length < 0)
-                {
-                    postings[id] = null;
-                    continue;
-                }
-
-                if (postings[id].Length != length) Array.Resize(ref postings[id], length);
+                if (postings[id] != null && postings[id].Length != lengths[id]) Array.Resize(ref postings[id], lengths[id]);
             }
         }
 
@@ -274,10 +273,9 @@ namespace OrdoMemory
         int AllocatePosting()
         {
             int id;
-            if (postingFree >= 0)
+            if (freeCount > 0)
             {
-                id = postingFree;
-                postingFree = -2 - lengths[id];
+                id = freeIds[--freeCount];
             }
             else
             {
@@ -298,8 +296,8 @@ namespace OrdoMemory
         void FreePosting(int id)
         {
             if (postings[id].Length > MaxPooledPostingLength) postings[id] = null;
-            lengths[id] = -2 - postingFree;
-            postingFree = id;
+            if (freeCount == freeIds.Length) Array.Resize(ref freeIds, freeCount * 2);
+            freeIds[freeCount++] = id;
         }
 
         public struct Enumerator : IPrimaryKeyEnumerator<TPrimaryKey>
