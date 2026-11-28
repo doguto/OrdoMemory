@@ -168,7 +168,7 @@ namespace OrdoMemory.Generator.Models
                 if (keyAttribute == null) continue;
 
                 var hash = keyAttribute.ConstructorArguments.Length > 0 && keyAttribute.ConstructorArguments[0].Value is int indexKind && indexKind == 1;
-                var unique = true;
+                var unique = false;
                 foreach (var argument in keyAttribute.NamedArguments)
                 {
                     if (argument.Key == "Unique" && argument.Value.Value is bool value) unique = value;
