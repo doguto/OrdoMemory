@@ -1,15 +1,13 @@
 namespace OrdoMemory
 {
-    // TryInsert / TryBulkInsert の結果
     public enum InsertResult
     {
-        // 挿入に成功した
         Success,
 
-        // Unique な SecondaryKey が既存の Record (BulkInsert では同じ一括挿入内の Record も含む) と重複した
+        // Unique な SecondaryKey の重複 (BulkInsert では一括挿入内も含む)
         Duplicate,
 
-        // スロットを使い切った (同時に持てる件数の上限、または世代の使い切り)
+        // スロットを使い切った
         Full
     }
 }

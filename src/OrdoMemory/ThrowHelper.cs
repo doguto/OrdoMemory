@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 
 namespace OrdoMemory
 {
-    // 例外の生成を呼び出し元から切り離し、検査を入れたメソッドのインライン化を妨げないようにする
+    // 呼び出し元のインライン化を妨げない
     static class ThrowHelper
     {
         [DoesNotReturn]

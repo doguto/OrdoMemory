@@ -60,21 +60,15 @@ int freeHead;
 - スキーマから struct を生成し、テーブルが唯一の実体を持つ.
   - Record ごとのオブジェクトヘッダと参照が無くなり、GC が管理するオブジェクトも配列数本だけになる.
   - 値で受け取るため、同じインスタンスを二重に Insert するという問題が起こり得ない.
-- `partial struct` とする. `readonly struct` でもよい.
-- PK のフィールドには `readonly` を必須とする (OM011). PK は Record とスロットを結び付けるため, Update でも書き換えない.
-- PK 以外のフィールド (SecondaryKey を含む) は `readonly` を外してよい. 外したフィールドは Update がその場で書き換える.
-  - Record 全体を作り直して上書きすると, 大きな Record の一部だけを頻繁に書き換える場合に遅いため (64 フィールド・約 260B の Record で 1 フィールドの更新が約 95ns に対し, その場で書き換えると約 43ns).
-  - SecondaryKey (FK など) が変わる場合は, 索引を付け替えた後にそのフィールドだけを書き込む.
-  - `readonly` のフィールドを変える場合だけ, 従来どおり Record 全体を作り直す. 値が同じキーを指定しても変更なしとして扱う.
-  - テーブルは Record を `ref readonly` かコピーでしか返さないため, `readonly` を外してもテーブル内の Record を書き換えられるのは Update のみで, 索引と食い違うことはない.
-- `readonly struct` でない場合, 利用者が定義するメソッド・プロパティには `readonly` 修飾子を付ける (付けなければ OM012 の警告). `ref readonly` / `in` で受け取ったときの隠れたコピー (defensive copy) を防ぐため. フィールドの読み取りではコピーは起きない.
-  - 生成するメンバー (`IRow` の実装) には `readonly` を付ける.
+- `partial struct` とする (`readonly struct` も可).
+- PK のフィールドは `readonly` 必須 (OM011). それ以外は任意で、`readonly` でないフィールドは Update がその場で書き込む.
+  - テーブルは Record を `ref readonly` かコピーでしか返さないため、書き換えは Update に限られ、索引と食い違わない.
+- `readonly struct` でない場合、メソッド・プロパティには `readonly` を付ける (無ければ OM012). `ref readonly` / `in` 越しの呼び出しで隠れたコピーが起きるため.
 - `[PrimaryKey]` を付けたフィールドを必ず 1 つ持つ. 型は PK の型 (`uint` / `ulong`) と一致させる.
   - フィールドは利用者が宣言する. 生成コードで追加すると partial struct のフィールドが複数の宣言に分かれ、並び順が定義されなくなるため (CS0282).
   - PK は Insert で払い出されるまで決まらない. 生成するコンストラクタは PK を引数に取らず、Insert / BulkInsert で払い出した PK を差し込んだコピーを格納する. Insert 時に渡された値は無視する.
   - Update の引数に PK は含めない.
-- PK を差し込んだコピーの作成と、Update で Record 全体を作り直す場合は、`RowInitTag` を先頭に取る internal な専用コンストラクタで全フィールドを直接代入して行う.
-  - 利用者が同じ型の並びで引数の順番が違うコンストラクタ (例: `(int b, int a)`) を定義していても、引数の位置で呼び違えてフィールドが入れ替わることがない.
+- PK を差し込んだコピーと Update での作り直しは、`RowInitTag` を取る専用コンストラクタで行う. 利用者定義のコンストラクタを引数の位置で呼び違えないため.
 - 生成時にフィールドをサイズの降順に並べ、パディングを減らす.
 
 ---
@@ -96,10 +90,8 @@ PK は符号なし整数とする. 符号ビットも世代に使え、`>>` が�
 | uint (既定) | 22 bit | 10 bit (1〜1023) | 約 419 万 | 1023 回 |
 | ulong | 32 bit | 32 bit | 約 43 億 | 約 43 億回 |
 
-- PK の型は `[PrimaryKey]` を付けたフィールドの型 (`uint` / `ulong`) で決まる. 属性で別途指定はしない.
-- ビットの配分は生成時に決める. `[OrdoTable(SlotBits = n)]` で変えられ、省略時は上表の配分になる.
-  - uint の 22 / 10 は、同時に持てる件数と同じスロットの再利用回数の釣り合いを取った値.
-  - ulong は件数が配列の長さ (`int`) で頭打ちになるため、スロットは 32 bit で足りる. 残りはすべて世代に回す.
+- PK の型は `[PrimaryKey]` のフィールドの型で決まる.
+- 配分は `[OrdoTable(SlotBits = n)]` で変えられる. ulong は件数が配列の長さで頭打ちになるため、スロットは 32 bit で足りる.
 - PK は Record の識別子であり、大小関係に意味は無い. Key 順・挿入順を前提とした API は持たない.
 
 ### 無効値
@@ -139,26 +131,20 @@ return ref dense[s.dense];
 2. 払い出す PK を差し込んだ Record を `dense[count]` に書き込み、`slots[slot].dense = count` とする.
 3. PK = `(generation << SlotBits) | slot` を返す.
 
-- Unique な SecondaryKey を持つ場合、重複の確認と挿入で索引を 2 回探索しないよう、次の順に行う.
-  1. 容量を確保する (`TryReserve`). 確保できなければ `Full` で失敗とする.
-  2. 次に払い出す PK を、状態を変えずに求める (`RowStore.NextPrimaryKey`). `TryReserve` はこの値を変えない.
-  3. その PK で Unique な索引へ挿入し、`Insert` の戻り値で重複を検出する. 重複した場合は、それまでに挿入した索引から取り除いて `Duplicate` で失敗とする.
-     - 重複で失敗した場合も 1 の容量確保 (配列の拡張) は残るが、件数・内容は変わらない.
-  4. Record を書き込み (上記 1〜3)、非 Unique な索引へ挿入する.
-- 失敗した場合、Record・索引・version はいずれも変わらない.
+- Unique な SecondaryKey は、容量を確保した後 `NextPrimaryKey` で先に索引へ挿入し、`Insert` の戻り値で重複を検出する (探索 1 回). 重複したら挿入済みの索引を戻す.
+- 失敗してもテーブルは変わらない.
 
 #### 失敗理由
 
-`TryInsert` / `TryBulkInsert` は結果を `InsertResult` で返す. 失敗する理由は次の 2 つ.
+`TryInsert` / `TryBulkInsert` は結果を `InsertResult` で返す.
 
 | `InsertResult` | 意味 |
 |---|---|
 | `Success` | 成功 |
-| `Duplicate` | Unique な SecondaryKey が既存の Record と重複した (BulkInsert では同じ一括挿入内の Record 同士の重複も含む) |
-| `Full` | スロットを使い切った (同時に持てる件数の上限、または世代の使い切り) |
+| `Duplicate` | Unique な SecondaryKey が重複した (BulkInsert では一括挿入内の重複も含む) |
+| `Full` | スロットを使い切った |
 
-- Insert / BulkInsert とも容量を先に確保するため、両方に該当する場合は `Full` を返す.
-- どちらの理由でも、テーブルの内容は変わらない.
+- 両方に該当する場合は `Full` (容量を先に確保するため).
 
 ### BulkInsert
 
@@ -171,7 +157,7 @@ return ref dense[s.dense];
 
 - 指定した項目だけを更新する (`Optional<T>`). アロケーションは発生しない.
 - SecondaryKey が変わらない場合は索引を更新しない. 変わる場合は、変更前の値で索引から削除し、変更後の値で挿入する.
-- Unique な索引は、変更後の値を先に挿入し、`Insert` の戻り値で重複を検出する. 重複した場合は、それまでに挿入した変更後の値を取り除いて失敗とし、Record・索引・version は変わらない. すべて挿入できた後で変更前の値を削除する.
+- Unique な索引は変更後の値を先に挿入して重複を検出する. 重複したら戻して失敗し、テーブルは変わらない.
 
 ### Remove
 
@@ -190,12 +176,12 @@ return ref dense[s.dense];
 ## 容量と参照の有効期間
 
 - 初期容量は構築時に指定する. `count` が容量に達した場合、配列を倍に拡張する.
-- `TrimExcess` で余った容量を返す. Ordered 索引は葉を詰め直して作り直すため、大量の削除で低充填になったノードもここで戻る.
+- `TrimExcess` で余った容量を返す (Ordered 索引は作り直す).
 - 次の操作の後は、`ref readonly` で受け取った参照を取り直す.
   - Remove: 末尾の Record が移動するため.
   - Insert / BulkInsert: 配列の拡張で再確保されるため.
 - 列挙中の Insert / Remove は `version` で検出し、例外とする.
-  - SecondaryKey が変わらない Update は構造を変えないため, 列挙中でも行える.
+  - SecondaryKey が変わらない Update は列挙中でも行える.
 
 ---
 
@@ -226,15 +212,9 @@ SecondaryKey ごとに、属性で種類を選ぶ.
 | long / double | 順序を保つ変換 (double は符号に応じてビット反転). 非 Unique は PK を別に持つ |
 | string | 先頭 4 文字 (UTF-16) を詰めた値. 等しいときだけ `string.CompareOrdinal` を呼ぶ |
 
-- 非 Unique で PK を正規化キーに詰めるのは、正規化キーだけで順序が確定する型 (`NeedsFullComparison` が false) で、かつ正規化キーと PK のビット数の和が 64 以下の場合に限る.
-  - フル比較が必要な型で詰めると、正規化キーが異なる時点で (先頭部分, PK) の順に決まってしまい、キーの順序が崩れるため.
-
-- 削除では木全体の再平衡 (merge-at-half) をしない. 1 回の削除で触るノードを限り、停止時間を O(b) に抑える.
-  - 葉: 件数が b/4 以下になったら、同じ親の隣の葉 (左を優先) と合わせて b 件以下なら併合し、超えるなら隣から借りて均す. 触るのは葉 2 枚と親 1 つだけ.
-  - 内部ノード: 併合も借り入れもせず、空になったものだけを解放する (free-at-empty). 根の子が 1 つになったら根を外して高さを下げる.
-  - 親をまたいだ併合はしないため、親の唯一の子になった葉や内部ノードは低充填のまま残りうる. 大量に削除した後に充填率と容量を戻したい場合は `TrimExcess` で作り直す.
-- 一括挿入は、件数が既存に比べて少なければ 1 件ずつ挿入し、多ければ整列して下から作り直す (目安: k < n / 16 なら 1 件ずつ).
-  - 作り直しでは、容量が足りる限り既存のノード配列を使い回す. 足りない場合だけ倍以上に広げて確保し直す. 必要な分まで縮めるのは `TrimExcess` のみ.
+- 非 Unique で PK を詰めるのは、`NeedsFullComparison` が false で正規化キーと PK が 64 bit に収まる場合のみ.
+- 削除は O(b) で済む範囲に限る. 葉が b/4 以下になったら同じ親の隣の葉と併合するか、借りて均す. 内部ノードは空になったら解放する (free-at-empty). 残った低充填は `TrimExcess` で戻す.
+- 一括挿入は k < n / 16 なら 1 件ずつ、それ以外は整列して作り直す (容量が足りれば配列を使い回す).
 
 #### 非 Unique な SecondaryKey
 
@@ -301,11 +281,10 @@ public sealed class SampleTable
 ```
 
 - 列挙は struct で返す (`foreach (ref readonly var row in table.All())`).
-- `FindRef` / `FindRefByXxx` / `FindFirstRefByXxx` は Record をコピーせず `ref readonly` で返す. 見つからない場合は `found = false` とし、`default` の Record への参照を返す. 参照はテーブルを変更する (Insert / Update / Remove / TrimExcess) までの間だけ有効.
+- `FindRef` 系は `ref readonly` で返す. 見つからなければ `found = false` で `default` への参照を返す.
 - 比較子は struct をジェネリクスで受けるか、生成コードに埋め込む (仮想呼び出しを避けるため).
 - 単一スレッド前提とする.
-- 生成コードが使う実装用の型 (`RowStore`, 索引, traits, `KeyConvert`, `KeyComparer` 等) は、生成コードから参照するため public だが、`[EditorBrowsable(EditorBrowsableState.Never)]` を付けて補完に出さない. 利用者が直接使うことは想定しない.
-  - `RowStore` の `Store` / `Remove` / `GetIndex` は前提 (容量の確保、添字の範囲、PK が格納済みであること) を検査し、満たさなければ例外を投げる.
+- 生成コード用の型 (`RowStore`, 索引等) は public だが `[EditorBrowsable(Never)]` で補完に出さない.
 
 ---
 

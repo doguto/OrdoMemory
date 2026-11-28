@@ -17,7 +17,6 @@ namespace OrdoMemory.Generator.Models
         public string Type { get; }
         public string ParameterName { get; }
 
-        // readonly でないフィールドは、Update でその場で書き換える
         public bool IsReadOnly { get; }
     }
 }
