@@ -87,7 +87,6 @@ namespace OrdoMemory.Generator.Emitting
                                                                            }
                                                                            """));
 
-            // RowInitTag: 利用者定義のコンストラクタと衝突しない専用コンストラクタ. 生成メンバーは readonly にする
             var thisArguments = string.Join(", ", model.Fields.Select(field => $"this.{field.Name}"));
             var rowInterface = $"global::OrdoMemory.IRow<{model.RowName}, {model.PrimaryKeyType}>";
             return Render($$"""
@@ -114,7 +113,6 @@ namespace OrdoMemory.Generator.Emitting
             var uniqueKeyIndices = keyIndices.Where(keyIndex => model.Keys[keyIndex].Unique).ToList();
             var multiKeyIndices = keyIndices.Where(keyIndex => !model.Keys[keyIndex].Unique).ToList();
 
-            // TryReserve は NextPrimaryKey を変えないため、先に確保してから Unique 索引へ挿入して重複を検出する
             var reserve = Render($$"""
                                    if (!__store.TryReserve(1))
                                    {
@@ -270,7 +268,6 @@ namespace OrdoMemory.Generator.Emitting
             var uniqueKeyIndices = keyIndices.Where(keyIndex => model.Keys[keyIndex].Unique).ToList();
             var anyChangedCondition = string.Join(" || ", keyIndices.Select(keyIndex => $"__changed{keyIndex}"));
 
-            // Unique 索引は変更後の値を先に挿入して重複を検出し、書き込みは成功後に行う
 
             var rebuild = Render($$"""
                                    {{Each(model.Fields, field => $"var {NextValue(field)} = {field.ParameterName}.OrElse(__current.{field.Name});")}}
@@ -280,7 +277,6 @@ namespace OrdoMemory.Generator.Emitting
                                    return true;
                                    """);
 
-            // readonly のフィールドを変える場合のみ作り直し、それ以外はその場で書き込む
             var body = rebuild;
             if (model.Fields.Any(field => !field.IsReadOnly))
             {
@@ -350,7 +346,6 @@ namespace OrdoMemory.Generator.Emitting
         {
             var key = model.Keys[keyIndex];
             var indexField = key.IndexField;
-            // Unique 索引には挿入済み
             return Render($$"""
                             if (__changed{{keyIndex}})
                             {

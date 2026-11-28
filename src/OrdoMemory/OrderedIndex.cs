@@ -57,7 +57,6 @@ namespace OrdoMemory
             this.unique = unique;
             pkBits = default(TPrimaryKeyTraits).Bits;
             pkMask = pkBits == 64 ? ulong.MaxValue : (1UL << pkBits) - 1;
-            // NeedsFullComparison のキーは PK を詰めると順序が崩れる
             packsPk = !unique && !NeedsFullComparison && default(TKeyTraits).NormalizedBits + pkBits <= 64;
             comparesPk = !unique && !packsPk;
             Reset(4, 4);
@@ -489,7 +488,6 @@ namespace OrdoMemory
             return true;
         }
 
-        // 1/4 以下になった葉を隣の葉と併合するか、借りて均す (O(b))
         void Rebalance(int leaf, int n)
         {
             var parent = pathNode[1];
@@ -509,7 +507,6 @@ namespace OrdoMemory
                     return;
                 }
 
-                // 最小キーが変わるため区切りを更新
                 var m = (s - n) / 2;
                 CopyLeafEntries(leaf, 0, leaf, m, n);
                 CopyLeafEntries(left, s - m, leaf, 0, m);
@@ -534,7 +531,6 @@ namespace OrdoMemory
                     return;
                 }
 
-                // 右の葉の最小キーが変わるため区切りを更新
                 var m = (s - n) / 2;
                 CopyLeafEntries(right, 0, leaf, n, m);
                 CopyLeafEntries(right, m, right, 0, s - m);
@@ -544,7 +540,6 @@ namespace OrdoMemory
             }
         }
 
-        // 重なりのある移動にも使える
         void CopyLeafEntries(int from, int fromPos, int to, int toPos, int n)
         {
             if (n <= 0) return;
@@ -751,7 +746,6 @@ namespace OrdoMemory
             }
         }
 
-        // exact (TrimExcess) なら必要な分だけ確保し直す. それ以外は容量が足りれば使い回す
         void Build(in EntryBuffer entries, int n, bool exact)
         {
             var leaves = Math.Max(1, (n + b - 1) / b);
@@ -918,7 +912,6 @@ namespace OrdoMemory
             }
             else if (NeedsFullComparison)
             {
-                // 参照を残さない
                 Array.Clear(lFull, 0, leafUsed * b);
             }
 

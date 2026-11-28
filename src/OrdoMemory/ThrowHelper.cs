@@ -4,7 +4,6 @@ using System.Runtime.CompilerServices;
 
 namespace OrdoMemory
 {
-    // 呼び出し元のインライン化を妨げない
     static class ThrowHelper
     {
         [DoesNotReturn]

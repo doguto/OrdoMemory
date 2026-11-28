@@ -49,7 +49,6 @@ namespace OrdoMemory.Generator
             }
         }
 
-        // A.B_C と A_B.C を区別する. 大文字小文字だけ違う名前は連番で区別する
         static string HintNameOf(INamedTypeSymbol type, HashSet<string> used)
         {
             var name = type.ToDisplayString().Replace("_", "__").Replace('.', '_');

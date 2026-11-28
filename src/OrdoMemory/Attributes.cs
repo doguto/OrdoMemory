@@ -13,7 +13,6 @@ namespace OrdoMemory
     {
         public string TableName { get; set; }
 
-        // スロット番号のビット数. 0 なら既定値 (uint: 22, ulong: 32)
         public int SlotBits { get; set; }
     }
 

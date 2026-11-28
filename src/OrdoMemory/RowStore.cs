@@ -11,7 +11,6 @@ namespace OrdoMemory
         where TPrimaryKeyTraits : struct, IPrimaryKeyTraits<TPrimaryKey>
     {
         const int MinGrowLength = 4; // データ配列の長さ更新時の更新量の下限
-        // Array.MaxLength (netstandard2.1 には無い)
         const int MaxArrayLength = 0x7FFFFFC7;
 
         // 生データを示す dense 配列の Index を持つ構造体
@@ -95,7 +94,6 @@ namespace OrdoMemory
             return ref dense[denseIndex];
         }
 
-        // 格納されていない PK は例外
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int GetIndex(TPrimaryKey primaryKey)
         {
@@ -119,12 +117,10 @@ namespace OrdoMemory
             return true;
         }
 
-        // 次の Store で払い出される主キー. TryReserve の後に読む (TryReserve はこの値を変えない)
         public TPrimaryKey NextPrimaryKey => freeHead >= 0
             ? MakePrimaryKey(slots[freeHead].generation, freeHead)
             : MakePrimaryKey(1, slotCount);
 
-        // 事前に TryReserve で容量を確保しておくこと
         public TPrimaryKey Store(in TRow row)
         {
             if (denseCount >= dense.Length || (freeHead < 0 && slotCount >= slots.Length)) ThrowHelper.ThrowNotReserved();

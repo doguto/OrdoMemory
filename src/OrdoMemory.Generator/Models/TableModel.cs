@@ -8,13 +8,10 @@ namespace OrdoMemory.Generator.Models
 {
     sealed class TableModel
     {
-        // uint: スロット 22 bit (約 419 万件) + 世代 10 bit (1023 回)
         const int DefaultUInt32SlotBits = 22;
 
-        // ulong: スロット 32 bit + 世代 32 bit. 件数は配列の長さで頭打ちになる
         const int DefaultUInt64SlotBits = 32;
 
-        // RowStore は世代を uint で持つ
         const int MinimumUInt64SlotBits = 32;
 
         public TableModel(
@@ -71,7 +68,6 @@ namespace OrdoMemory.Generator.Models
                 return null;
             }
 
-            // readonly struct でなくてもよい
             var isPartial = type.DeclaringSyntaxReferences.All(reference =>
                 reference.GetSyntax() is StructDeclarationSyntax declaration && declaration.Modifiers.Any(SyntaxKind.PartialKeyword)
             );
@@ -81,7 +77,6 @@ namespace OrdoMemory.Generator.Models
                 return null;
             }
 
-            // ref readonly 越しに呼ぶと隠れたコピーが起きるため警告する
             if (!type.IsReadOnly) ReportNonReadOnlyMembers(type, context);
 
             var isValid = true;
@@ -141,7 +136,6 @@ namespace OrdoMemory.Generator.Models
 
                 var isPrimaryKey = field.GetAttributes().Any(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, primaryKeyAttributeType));
 
-                // SecondaryKey はテーブルが ref readonly でしか返さず Update 経由でしか変わらないため、readonly は PK のみ必須
                 if (isPrimaryKey && !field.IsReadOnly)
                 {
                     context.ReportDiagnostic(Diagnostic.Create(Diagnostics.PrimaryKeyMustBeReadOnly, field.Locations.FirstOrDefault(), field.Name));
