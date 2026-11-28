@@ -8,6 +8,17 @@ namespace OrdoMemory.Generator.Models
 {
     sealed class TableModel
     {
+        // uint の PK の既定の配分: スロット 22 bit + 世代 10 bit.
+        // 同時に持てる件数 (2^22 = 約 419 万) と、同じスロットを再利用できる回数 (2^10 - 1 = 1023 回) の釣り合いを取った値.
+        const int DefaultUInt32SlotBits = 22;
+
+        // ulong の PK の既定の配分: スロット 32 bit + 世代 32 bit.
+        // 件数は配列の長さ (int) で頭打ちになるためスロットは 32 bit あれば足り、残りをすべて世代に回す (約 43 億回).
+        const int DefaultUInt64SlotBits = 32;
+
+        // ulong の PK で世代を 32 bit より広くしても、RowStore が世代を uint で持つため使い切れない
+        const int MinimumUInt64SlotBits = 32;
+
         public TableModel(
             string namespaceName,
             string rowName,
@@ -62,19 +73,26 @@ namespace OrdoMemory.Generator.Models
                 return null;
             }
 
-            // readonly かつ partial であることを確認する
+            // partial であることを確認する. readonly struct でなくてもよい (readonly でないフィールドは Update でその場で書き換える)
             var isPartial = type.DeclaringSyntaxReferences.All(reference =>
                 reference.GetSyntax() is StructDeclarationSyntax declaration && declaration.Modifiers.Any(SyntaxKind.PartialKeyword)
             );
-            if (!type.IsReadOnly || !isPartial)
+            if (!isPartial)
             {
-                context.ReportDiagnostic(Diagnostic.Create(Diagnostics.MustBeReadOnlyPartial, location, type.Name));
+                context.ReportDiagnostic(Diagnostic.Create(Diagnostics.MustBePartial, location, type.Name));
                 return null;
             }
 
+            // readonly struct でない場合、readonly でないメンバーを ref readonly / in 越しに呼ぶと隠れたコピーが起きるため警告する
+            if (!type.IsReadOnly) ReportNonReadOnlyMembers(type, context);
+
             var isValid = true;
             var tableName = type.Name + "Table";
-            var usesUInt64PrimaryKey = false;
+            // PK の型は [PrimaryKey] を付けたフィールドの型 (uint / ulong) から決める
+            var usesUInt64PrimaryKey = type.GetMembers().OfType<IFieldSymbol>().Any(field =>
+                !field.IsStatic &&
+                field.Type.SpecialType == SpecialType.System_UInt64 &&
+                field.GetAttributes().Any(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, primaryKeyAttributeType)));
             var slotBits = 0;
             foreach (var argument in tableAttribute.NamedArguments)
             {
@@ -83,18 +101,15 @@ namespace OrdoMemory.Generator.Models
                     case "TableName":
                         if (argument.Value.Value is string name && name.Length > 0) tableName = name;
                         break;
-                    case "PrimaryKey":
-                        usesUInt64PrimaryKey = argument.Value.Value is int primaryKeyKind && primaryKeyKind == 1;
-                        break;
                     case "SlotBits":
                         slotBits = argument.Value.Value is int bits ? bits : 0;
                         break;
                 }
             }
 
-            var minimumSlotBits = usesUInt64PrimaryKey ? 32 : 1;
+            var minimumSlotBits = usesUInt64PrimaryKey ? MinimumUInt64SlotBits : 1;
             var maximumSlotBits = usesUInt64PrimaryKey ? 63 : 31;
-            if (slotBits == 0) slotBits = usesUInt64PrimaryKey ? 32 : 22;
+            if (slotBits == 0) slotBits = usesUInt64PrimaryKey ? DefaultUInt64SlotBits : DefaultUInt32SlotBits;
             if (slotBits < minimumSlotBits || slotBits > maximumSlotBits)
             {
                 context.ReportDiagnostic(Diagnostic.Create(Diagnostics.InvalidSlotBits, location, slotBits, PrimaryKeyTypeOf(usesUInt64PrimaryKey), $"{minimumSlotBits}..{maximumSlotBits}"));
@@ -127,15 +142,25 @@ namespace OrdoMemory.Generator.Models
 
                 var keyAttribute = field.GetAttributes().FirstOrDefault(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, keyAttributeType));
 
-                if (field.GetAttributes().Any(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, primaryKeyAttributeType)))
+                var isPrimaryKey = field.GetAttributes().Any(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, primaryKeyAttributeType));
+
+                // PK は Record とスロットを結び付けるため、書き換えられないようにする.
+                // SecondaryKey は readonly でなくてもよい. テーブルは Record を ref readonly / コピーでしか返さないため、
+                // テーブル内の Record を書き換えられるのは Update のみで、Update は索引を付け替えてから書き込む
+                if (isPrimaryKey && !field.IsReadOnly)
+                {
+                    context.ReportDiagnostic(Diagnostic.Create(Diagnostics.PrimaryKeyMustBeReadOnly, field.Locations.FirstOrDefault(), field.Name));
+                    isValid = false;
+                }
+
+                if (isPrimaryKey)
                 {
                     primaryKeyCount++;
                     primaryKeyField = field.Name;
 
-                    var primaryKeySpecialType = usesUInt64PrimaryKey ? SpecialType.System_UInt64 : SpecialType.System_UInt32;
-                    if (field.Type.SpecialType != primaryKeySpecialType)
+                    if (field.Type.SpecialType != SpecialType.System_UInt32 && field.Type.SpecialType != SpecialType.System_UInt64)
                     {
-                        context.ReportDiagnostic(Diagnostic.Create(Diagnostics.PrimaryKeyType, field.Locations.FirstOrDefault(), field.Name, PrimaryKeyTypeOf(usesUInt64PrimaryKey)));
+                        context.ReportDiagnostic(Diagnostic.Create(Diagnostics.PrimaryKeyType, field.Locations.FirstOrDefault(), field.Name));
                         isValid = false;
                     }
 
@@ -148,7 +173,7 @@ namespace OrdoMemory.Generator.Models
                     continue;
                 }
 
-                var fieldModel = new FieldModel(field.Name, field.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+                var fieldModel = new FieldModel(field.Name, field.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat), field.IsReadOnly);
                 fields.Add(fieldModel);
 
                 if (keyAttribute == null) continue;
@@ -201,6 +226,24 @@ namespace OrdoMemory.Generator.Models
                 fields,
                 keys,
                 generateConstructor);
+        }
+
+        static void ReportNonReadOnlyMembers(INamedTypeSymbol type, GeneratorExecutionContext context)
+        {
+            foreach (var member in type.GetMembers())
+            {
+                if (member.IsStatic || member.IsImplicitlyDeclared) continue;
+
+                switch (member)
+                {
+                    case IMethodSymbol method when method.MethodKind == MethodKind.Ordinary && !method.IsReadOnly:
+                        context.ReportDiagnostic(Diagnostic.Create(Diagnostics.MemberShouldBeReadOnly, method.Locations.FirstOrDefault(), type.Name, method.Name));
+                        break;
+                    case IPropertySymbol property when property.GetMethod != null && !property.GetMethod.IsReadOnly:
+                        context.ReportDiagnostic(Diagnostic.Create(Diagnostics.MemberShouldBeReadOnly, property.Locations.FirstOrDefault(), type.Name, property.Name));
+                        break;
+                }
+            }
         }
 
         static bool TryMapKeyType(ITypeSymbol type, out KeyTypeMapping mapping)
