@@ -474,10 +474,8 @@ namespace OrdoMemory.Tests
         public void SlotCapacityIsObservable()
         {
             var table = new TinyRowTable();
-            var maxGeneration = (1UL << (32 - TinyRowTable.SlotBits)) - 1;
             Assert.Equal(4, table.AvailableSlotCount);
             Assert.Equal(0, table.RetiredSlotCount);
-            Assert.Equal(4 * maxGeneration, table.RemainingInsertCount);
 
             var primaryKeys = new uint[4];
             for (var i = 0; i < 4; i++)
@@ -486,11 +484,9 @@ namespace OrdoMemory.Tests
             }
 
             Assert.Equal(0, table.AvailableSlotCount);
-            Assert.Equal(4 * maxGeneration - 4, table.RemainingInsertCount);
 
             Assert.True(table.Remove(primaryKeys[0]));
             Assert.Equal(1, table.AvailableSlotCount);
-            Assert.Equal(4 * maxGeneration - 4, table.RemainingInsertCount);
         }
 
         [Fact]
@@ -499,9 +495,7 @@ namespace OrdoMemory.Tests
             // SlotBits = 30 のため世代は 1..3 の 3 回だけ使える
             var table = new ShortGenRowTable();
             var maxSlots = 1 << ShortGenRowTable.SlotBits;
-            var initialRemaining = (ulong)maxSlots * 3;
             Assert.Equal(maxSlots, table.AvailableSlotCount);
-            Assert.Equal(initialRemaining, table.RemainingInsertCount);
 
             for (var i = 0; i < 3; i++)
             {
@@ -512,24 +506,21 @@ namespace OrdoMemory.Tests
 
             Assert.Equal(1, table.RetiredSlotCount);
             Assert.Equal(maxSlots - 1, table.AvailableSlotCount);
-            Assert.Equal(initialRemaining - 3, table.RemainingInsertCount);
             Assert.Equal(0, table.Count);
         }
 
         [Fact]
         public void LifetimeInsertLimitIsObservable()
         {
-            // スロット 3 bit, 世代 3 bit (1..7) のため、生涯で 8 * 7 = 56 回だけ Insert できる
+            // スロット 3 bit, 世代 3 bit (1..7) のため、生涯で 8 * 7 = 56 回だけ Insert でき、その後は全スロットが使用停止になる
             var store = new RowStore<TinyRow, uint, SixBitPrimaryKey>(0, 3);
             Assert.Equal(8, store.AvailableSlotCount);
-            Assert.Equal(56UL, store.RemainingInsertCount);
 
             var inserted = 0UL;
             while (store.TryReserve(1))
             {
                 var primaryKey = store.Store(new TinyRow(0));
                 inserted++;
-                Assert.Equal(56UL - inserted, store.RemainingInsertCount);
                 Assert.True(store.TryGetIndex(primaryKey, out var index));
                 store.Remove(index);
             }
@@ -538,7 +529,6 @@ namespace OrdoMemory.Tests
             Assert.Equal(0, store.Count);
             Assert.Equal(8, store.RetiredSlotCount);
             Assert.Equal(0, store.AvailableSlotCount);
-            Assert.Equal(0UL, store.RemainingInsertCount);
         }
 
         readonly struct SixBitPrimaryKey : IPrimaryKeyTraits<uint>

@@ -40,7 +40,6 @@ namespace OrdoMemory.Generator.Emitting
                                  
                                      public int RetiredSlotCount => __store.RetiredSlotCount;
                                  
-                                     public ulong RemainingInsertCount => __store.RemainingInsertCount;
                                  
                                      {{EmitInsert(model)}}
                                  

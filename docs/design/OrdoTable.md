@@ -124,11 +124,8 @@ PK は符号なし整数とする. 符号ビットも世代に使え、`>>` が�
 |---|---|---|
 | `AvailableSlotCount` | `int` | 削除を挟まずに、今から続けて Insert できる件数. `スロット数の上限 − Count − RetiredSlotCount` |
 | `RetiredSlotCount` | `int` | 世代を使い切り、使用を止めたスロットの数. 増える一方で減らない |
-| `RemainingInsertCount` | `ulong` | 生存中の Record を削除してスロットを再利用する場合も含めた、生涯の Insert 回数の残り. `スロット数の上限 × 世代の最大値 − これまでに払い出した PK の数` |
 
-- `AvailableSlotCount` は「今あと何件入るか」、`RemainingInsertCount` は「あと何回 Insert できるか」を表す. 世代の使い切りの兆候は `RemainingInsertCount` と `RetiredSlotCount` で監視する.
-- `RemainingInsertCount` が 0 のとき、Remove を行っても Insert は成功しない.
-- BulkInsert が Unique 違反で巻き戻した場合も、一度払い出した PK の分だけ `RemainingInsertCount` は減る.
+- 世代の使い切りの兆候は `RetiredSlotCount` で監視する. `AvailableSlotCount` が 0 かつ `Count` が 0 のとき、Remove を行っても Insert は成功しない.
 
 ---
 
@@ -276,7 +273,7 @@ MySQL (InnoDB) の二次索引と同様に、B+Tree のキーを `(SecondaryKey,
 | All            | 全 Record の取得. 順序は保証しない              |
 | Remove         | PK に対応する Record の削除                    |
 | TrimExcess     | 余った容量を返す                              |
-| AvailableSlotCount / RetiredSlotCount / RemainingInsertCount | 残容量の観測 (「残容量の観測」を参照) |
+| AvailableSlotCount / RetiredSlotCount | 残容量の観測 (「残容量の観測」を参照) |
 
 ```csharp
 public sealed class SampleTable
@@ -302,7 +299,6 @@ public sealed class SampleTable
 
     public int AvailableSlotCount { get; }
     public int RetiredSlotCount { get; }
-    public ulong RemainingInsertCount { get; }
 }
 ```
 
