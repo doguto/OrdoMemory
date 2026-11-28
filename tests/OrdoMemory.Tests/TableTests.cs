@@ -492,7 +492,6 @@ namespace OrdoMemory.Tests
         [Fact]
         public void GenerationExhaustionRetiresSlotObservably()
         {
-            // SlotBits = 30 のため世代は 1..3 の 3 回だけ使える
             var table = new ShortGenRowTable();
             var maxSlots = 1 << ShortGenRowTable.SlotBits;
             Assert.Equal(maxSlots, table.AvailableSlotCount);
@@ -512,7 +511,6 @@ namespace OrdoMemory.Tests
         [Fact]
         public void LifetimeInsertLimitIsObservable()
         {
-            // スロット 3 bit, 世代 3 bit (1..7) のため、生涯で 8 * 7 = 56 回だけ Insert でき、その後は全スロットが使用停止になる
             var store = new RowStore<TinyRow, uint, SixBitPrimaryKey>(0, 3);
             Assert.Equal(8, store.AvailableSlotCount);
 

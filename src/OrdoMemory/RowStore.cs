@@ -66,11 +66,8 @@ namespace OrdoMemory
 
         public int Version => version;
 
-        // 削除を挟まずに、今から続けて Insert できる件数
-        // 未使用の slot と空きリスト上の slot の合計. 世代を使い切った slot は含まない
         public int AvailableSlotCount => maxSlots - denseCount - retiredSlotCount;
 
-        // 世代を使い切り、使用を止めた slot の数
         public int RetiredSlotCount => retiredSlotCount;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
