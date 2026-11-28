@@ -57,7 +57,6 @@ namespace OrdoMemory
             this.unique = unique;
             pkBits = default(TPrimaryKeyTraits).Bits;
             pkMask = pkBits == 64 ? ulong.MaxValue : (1UL << pkBits) - 1;
-            // 正規化値が順序を確定しないキー (NeedsFullComparison) では、PK を下位 bit に詰めると正規化値の比較だけで (prefix, PK) 順に並んでしまい、フルキー順にならないため詰めない
             packsPk = !unique && !NeedsFullComparison && default(TKeyTraits).NormalizedBits + pkBits <= 64;
             comparesPk = !unique && !packsPk;
             Reset(4, 4);
@@ -489,7 +488,6 @@ namespace OrdoMemory
             return true;
         }
 
-        // 充填が 1/4 以下になった葉を、同じ親の隣の葉と併合するか、隣の葉から借りて均す.
         void Rebalance(int leaf, int leafEntryCount)
         {
             var parent = pathNode[1];
@@ -501,7 +499,6 @@ namespace OrdoMemory
                 var siblingCount = leafCount[left];
                 if (siblingCount + leafEntryCount <= nodeSize)
                 {
-                    // 左の葉の末尾へ移し、この葉を外す.
                     CopyLeafEntries(leaf, 0, left, siblingCount, leafEntryCount);
                     leafCount[left] = siblingCount + leafEntryCount;
                     leafCount[leaf] = 0;
@@ -510,7 +507,6 @@ namespace OrdoMemory
                     return;
                 }
 
-                // 左の葉の末尾から借りる. この葉の最小キーが変わるため区切りを更新する.
                 var borrowCount = (siblingCount - leafEntryCount) / 2;
                 CopyLeafEntries(leaf, 0, leaf, borrowCount, leafEntryCount);
                 CopyLeafEntries(left, siblingCount - borrowCount, leaf, 0, borrowCount);
@@ -526,7 +522,6 @@ namespace OrdoMemory
                 var siblingCount = leafCount[right];
                 if (siblingCount + leafEntryCount <= nodeSize)
                 {
-                    // 右の葉をこの葉の末尾へ移し、右の葉を外す.
                     CopyLeafEntries(right, 0, leaf, leafEntryCount, siblingCount);
                     leafCount[leaf] = leafEntryCount + siblingCount;
                     leafCount[right] = 0;
@@ -536,7 +531,6 @@ namespace OrdoMemory
                     return;
                 }
 
-                // 右の葉の先頭から借りる. 右の葉の最小キーが変わるため区切りを更新する.
                 var borrowCount = (siblingCount - leafEntryCount) / 2;
                 CopyLeafEntries(right, 0, leaf, leafEntryCount, borrowCount);
                 CopyLeafEntries(right, borrowCount, right, 0, siblingCount - borrowCount);
@@ -546,7 +540,6 @@ namespace OrdoMemory
             }
         }
 
-        // 重なりのある移動にも使える. 移動元で使わなくなった範囲のキーは消す.
         void CopyLeafEntries(int fromLeaf, int fromPos, int toLeaf, int toPos, int length)
         {
             if (length <= 0) return;
@@ -753,9 +746,6 @@ namespace OrdoMemory
             }
         }
 
-        // exact = true (TrimExcess) なら必要な分だけ確保し直す.
-        // false なら容量が足りる限り既存の配列を使い回し、足りなければ倍以上に広げて確保する.
-        // 呼び出し側は entries を木とは別のバッファに集め終えているため、使い回しても読み途中のデータは壊れない.
         void Build(in EntryBuffer entries, int entryCount, bool exact)
         {
             var leaves = Math.Max(1, (entryCount + nodeSize - 1) / nodeSize);
@@ -922,7 +912,6 @@ namespace OrdoMemory
             }
             else if (NeedsFullComparison)
             {
-                // 参照を残さないよう、使っていた範囲のキーを消す.
                 Array.Clear(leafFull, 0, leafUsed * nodeSize);
             }
 
