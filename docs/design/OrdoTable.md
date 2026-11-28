@@ -152,18 +152,32 @@ return ref dense[s.dense];
 3. PK = `(generation << SlotBits) | slot` を返す.
 
 - Unique な SecondaryKey を持つ場合、重複の確認と挿入で索引を 2 回探索しないよう、次の順に行う.
-  1. 容量を確保する (`TryReserve`). 確保できなければ失敗とする.
+  1. 容量を確保する (`TryReserve`). 確保できなければ `Full` で失敗とする.
   2. 次に払い出す PK を、状態を変えずに求める (`RowStore.NextPrimaryKey`). `TryReserve` はこの値を変えない.
-  3. その PK で Unique な索引へ挿入し、`Insert` の戻り値で重複を検出する. 重複した場合は、それまでに挿入した索引から取り除いて失敗とする.
+  3. その PK で Unique な索引へ挿入し、`Insert` の戻り値で重複を検出する. 重複した場合は、それまでに挿入した索引から取り除いて `Duplicate` で失敗とする.
      - 重複で失敗した場合も 1 の容量確保 (配列の拡張) は残るが、件数・内容は変わらない.
   4. Record を書き込み (上記 1〜3)、非 Unique な索引へ挿入する.
 - 失敗した場合、Record・索引・version はいずれも変わらない.
+
+#### 失敗理由
+
+`TryInsert` / `TryBulkInsert` は結果を `InsertResult` で返す. 失敗する理由は次の 2 つ.
+
+| `InsertResult` | 意味 |
+|---|---|
+| `Success` | 成功 |
+| `Duplicate` | Unique な SecondaryKey が既存の Record と重複した (BulkInsert では同じ一括挿入内の Record 同士の重複も含む) |
+| `Full` | スロットを使い切った (同時に持てる件数の上限、または世代の使い切り) |
+
+- Insert / BulkInsert とも容量を先に確保するため、両方に該当する場合は `Full` を返す.
+- どちらの理由でも、テーブルの内容は変わらない.
 
 ### BulkInsert
 
 - 払い出す PK は連続しないため、PK を書き込む出力先 (Span) を引数で受け取る.
 - `dense` / `slots` を必要な件数分まとめて拡張してから書き込む.
-- 上限を超える場合は何も挿入せずに失敗する.
+- 上限を超える場合は何も挿入せずに失敗する (`InsertResult.Full`).
+- Unique 制約に違反した場合は、挿入した Record を巻き戻して失敗する (`InsertResult.Duplicate`).
 
 ### Update
 
@@ -280,8 +294,8 @@ public sealed class SampleTable
 {
     public const uint InvalidPrimaryKey = 0;
 
-    public bool TryInsert(in SampleRow row, out uint primaryKey);
-    public bool TryBulkInsert(ReadOnlySpan<SampleRow> rows, Span<uint> primaryKeys);
+    public InsertResult TryInsert(in SampleRow row, out uint primaryKey);
+    public InsertResult TryBulkInsert(ReadOnlySpan<SampleRow> rows, Span<uint> primaryKeys);
 
     public bool TryFind(uint primaryKey, out SampleRow row);
     public ref readonly SampleRow FindRef(uint primaryKey, out bool found);

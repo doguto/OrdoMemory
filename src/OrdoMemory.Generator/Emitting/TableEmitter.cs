@@ -122,14 +122,14 @@ namespace OrdoMemory.Generator.Emitting
             var uniqueKeyIndices = keyIndices.Where(keyIndex => model.Keys[keyIndex].Unique).ToList();
             var multiKeyIndices = keyIndices.Where(keyIndex => !model.Keys[keyIndex].Unique).ToList();
 
-            // 先に容量を確保する. TryReserve は次に払い出す主キーを変えないため、確保後に読んだ NextPrimaryKey が Store で払い出される.
+            // 先に容量を確保する (確保できなければ Full). TryReserve は次に払い出す主キーを変えないため、確保後に読んだ NextPrimaryKey が Store で払い出される.
             // Unique な索引には、その主キーで Store より先に挿入し、Insert の戻り値で重複を検出する (探索は 1 回で済む).
             // 重複した場合は、それまでに挿入した索引を取り消してから失敗を返す
             var reserve = Render($$"""
                                    if (!__store.TryReserve(1))
                                    {
                                        primaryKey = InvalidPrimaryKey;
-                                       return false;
+                                       return global::OrdoMemory.InsertResult.Full;
                                    }
                                    {{If(uniqueKeyIndices.Count > 0, Render($$"""
 
@@ -140,13 +140,13 @@ namespace OrdoMemory.Generator.Emitting
                                    """);
 
             return Render($$"""
-                            public bool TryInsert(in {{model.RowFullName}} row, out {{model.PrimaryKeyType}} primaryKey)
+                            public global::OrdoMemory.InsertResult TryInsert(in {{model.RowFullName}} row, out {{model.PrimaryKeyType}} primaryKey)
                             {
                                 {{reserve}}
                             
                                 primaryKey = __store.Store(in row);
                                 {{Each(multiKeyIndices, keyIndex => $"{model.Keys[keyIndex].IndexField}.Insert({ConvertKey(model.Keys[keyIndex], "row." + model.Keys[keyIndex].Field.Name)}, primaryKey);")}}
-                                return true;
+                                return global::OrdoMemory.InsertResult.Success;
                             }
                             """);
         }
@@ -159,7 +159,7 @@ namespace OrdoMemory.Generator.Emitting
                             {
                                 {{EmitRollbackUniqueIndexes(model, uniqueKeyIndices, position, "__key", "__nextPrimaryKey")}}
                                 primaryKey = InvalidPrimaryKey;
-                                return false;
+                                return global::OrdoMemory.InsertResult.Duplicate;
                             }
                             """);
         }
@@ -184,12 +184,12 @@ namespace OrdoMemory.Generator.Emitting
                                                                       """));
 
             return Render($$"""
-                            public bool TryBulkInsert(global::System.ReadOnlySpan<{{rowType}}> rows, global::System.Span<{{primaryKeyType}}> primaryKeys)
+                            public global::OrdoMemory.InsertResult TryBulkInsert(global::System.ReadOnlySpan<{{rowType}}> rows, global::System.Span<{{primaryKeyType}}> primaryKeys)
                             {
                                 if (primaryKeys.Length < rows.Length) throw new global::System.ArgumentException("primaryKeys is shorter than rows.", nameof(primaryKeys));
                                 var rowCount = rows.Length;
-                                if (rowCount == 0) return true;
-                                if (!__store.TryReserve(rowCount)) return false;
+                                if (rowCount == 0) return global::OrdoMemory.InsertResult.Success;
+                                if (!__store.TryReserve(rowCount)) return global::OrdoMemory.InsertResult.Full;
                             
                                 for (var i = 0; i < rowCount; i++)
                                 {
@@ -200,7 +200,7 @@ namespace OrdoMemory.Generator.Emitting
                             
                                 {{Each(keyIndices, keyIndex => EmitBulkInsertIndex(model, keyIndex), "\n\n")}}
                             
-                                return true;
+                                return global::OrdoMemory.InsertResult.Success;
                             }
 
                             void __RollbackBulkInsert(global::System.ReadOnlySpan<{{rowType}}> rows, global::System.ReadOnlySpan<{{primaryKeyType}}> primaryKeys, int addedIndexes)
@@ -232,7 +232,7 @@ namespace OrdoMemory.Generator.Emitting
                             if (!added{{keyIndex}})
                             {
                                 __RollbackBulkInsert(rows, stored, {{keyIndex}});
-                                return false;
+                                return global::OrdoMemory.InsertResult.Duplicate;
                             }
                             """);
         }
