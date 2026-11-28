@@ -119,13 +119,16 @@ namespace OrdoMemory
     {
         const int InitialPostingLength = 2;
 
+        const int MaxPooledPostingLength = 16;
+
         readonly Dictionary<TKey, int> map = new(KeyComparer<TKey>.Default);
         int nullPosting = -1;
 
         TPrimaryKey[][] postings = new TPrimaryKey[4][];
         int[] lengths = new int[4];
         int postingUsed;
-        int postingFree = -1;
+        int[] freeIds = new int[4];
+        int freeCount;
         int count;
 
         public int Count => count;
@@ -240,19 +243,24 @@ namespace OrdoMemory
         {
             map.Clear();
             nullPosting = -1;
-            Array.Clear(postings, 0, postingUsed);
+            for (var id = 0; id < postingUsed; id++)
+            {
+                if (postings[id] != null && postings[id].Length > MaxPooledPostingLength) postings[id] = null;
+            }
+
             postingUsed = 0;
-            postingFree = -1;
+            freeCount = 0;
             count = 0;
         }
 
         public void TrimExcess()
         {
             map.TrimExcess();
+            for (var i = 0; i < freeCount; i++) postings[freeIds[i]] = null;
+            Array.Clear(postings, postingUsed, postings.Length - postingUsed);
             for (var id = 0; id < postingUsed; id++)
             {
-                var list = postings[id];
-                if (list != null && list.Length != lengths[id]) Array.Resize(ref postings[id], lengths[id]);
+                if (postings[id] != null && postings[id].Length != lengths[id]) Array.Resize(ref postings[id], lengths[id]);
             }
         }
 
@@ -265,10 +273,9 @@ namespace OrdoMemory
         int AllocatePosting()
         {
             int id;
-            if (postingFree >= 0)
+            if (freeCount > 0)
             {
-                id = postingFree;
-                postingFree = lengths[id];
+                id = freeIds[--freeCount];
             }
             else
             {
@@ -281,16 +288,16 @@ namespace OrdoMemory
                 id = postingUsed++;
             }
 
-            postings[id] = new TPrimaryKey[InitialPostingLength];
+            if (postings[id] == null) postings[id] = new TPrimaryKey[InitialPostingLength];
             lengths[id] = 0;
             return id;
         }
 
         void FreePosting(int id)
         {
-            postings[id] = null;
-            lengths[id] = postingFree;
-            postingFree = id;
+            if (postings[id].Length > MaxPooledPostingLength) postings[id] = null;
+            if (freeCount == freeIds.Length) Array.Resize(ref freeIds, freeCount * 2);
+            freeIds[freeCount++] = id;
         }
 
         public struct Enumerator : IPrimaryKeyEnumerator<TPrimaryKey>

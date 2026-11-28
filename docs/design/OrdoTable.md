@@ -244,6 +244,7 @@ MySQL (InnoDB) の二次索引と同様に、B+Tree のキーを `(SecondaryKey,
 
 - Unique: `Dictionary<TKey, uint>`.
 - 非 Unique: 値ごとに PK の配列を持つ. PK は単調増加しないため配列は順序を持たず、削除は末尾との入れ替えとする.
+  - 空になった配列は使い回す (長さ 16 以下). `TrimExcess` で手放す.
 
 ### 将来の候補: Bitmap
 
