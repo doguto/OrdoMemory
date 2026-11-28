@@ -109,6 +109,14 @@ namespace OrdoMemory.Tests
             B = b;
         }
     }
+
+    [OrdoTable(SlotBits = 30)]
+    public readonly partial struct ShortGenRow
+    {
+        [PrimaryKey] public readonly uint Id;
+
+        public readonly int Value;
+    }
 }
 
 // 生成ファイルのヒント名が衝突しないことの確認用 (OrdoMemory.Tests.HintName.A_B と OrdoMemory.Tests.HintName_A.B)

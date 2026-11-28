@@ -114,6 +114,12 @@ PK は符号なし整数とする. 符号ビットも世代に使え、`>>` が�
   - 古いハンドルが、同じスロットを再利用した別の Record を指す事故 (ABA) を防ぐため.
   - 使用を止めたスロットは 1 つにつき 8B を消費し続ける.
 - スロットを使い切った場合、Insert を失敗させる.
+  - 生涯の Insert 回数は `スロット数 × 世代の最大値` が上限 (uint の既定で約 2^32 回). 長時間 Insert / Remove を繰り返すなら ulong を使う.
+
+### 残容量の観測
+
+- `AvailableSlotCount`: 今から続けて Insert できる件数.
+- `RetiredSlotCount`: 世代を使い切ったスロットの数.
 
 ---
 
@@ -275,6 +281,7 @@ MySQL (InnoDB) の二次索引と同様に、B+Tree のキーを `(SecondaryKey,
 | All            | 全 Record の取得. 順序は保証しない              |
 | Remove         | PK に対応する Record の削除                    |
 | TrimExcess     | 余った容量を返す                              |
+| AvailableSlotCount / RetiredSlotCount | 残容量 |
 
 ```csharp
 public sealed class SampleTable
@@ -297,6 +304,9 @@ public sealed class SampleTable
     public NameEnumerable FindRangeByName(string min, string max);
 
     public void TrimExcess();
+
+    public int AvailableSlotCount { get; }
+    public int RetiredSlotCount { get; }
 }
 ```
 

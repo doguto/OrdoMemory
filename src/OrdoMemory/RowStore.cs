@@ -66,6 +66,10 @@ namespace OrdoMemory
 
         public int Version => version;
 
+        public int AvailableSlotCount => maxSlots - denseCount - retiredSlotCount;
+
+        public int RetiredSlotCount => retiredSlotCount;
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool TryGetIndex(TPrimaryKey primaryKey, out int index)
         {
