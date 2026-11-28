@@ -173,9 +173,19 @@ return ref dense[s.dense];
 4. 末尾を `default` で消す (Record が持つ参照を GC に解放させるため).
 5. スロットの世代を進めて空きリストへ戻す (一周した場合は戻さない).
 
+### Upsert
+
+- PK は挿入前に分からないため、Unique な SecondaryKey ごとに `UpsertByXxx` を生成して照合する.
+- あれば PK 以外の全フィールドを Update し、無ければ Insert する. 結果は `InsertResult` で返す.
+
+### Clear
+
+- 全 Record と索引を空にする. 世代は巻き戻さず Remove と同じく進めるため、Clear 前の PK は無効になる. 容量は残す.
+
 ### All
 
 - `dense[0 .. count)` を先頭から読む. 順序は保証しない (Remove のたびに変わる).
+- 列挙用の struct は `IEnumerable<T>` を明示実装する (LINQ 経由では boxing が起きる). `CopyTo(Span<T>)` で書き出せる.
 
 ---
 
@@ -185,8 +195,8 @@ return ref dense[s.dense];
 - `TrimExcess` で余った容量を返す (Ordered 索引は作り直す).
 - 次の操作の後は、`ref readonly` で受け取った参照を取り直す.
   - Remove: 末尾の Record が移動するため.
-  - Insert / BulkInsert: 配列の拡張で再確保されるため.
-- 列挙中の Insert / Remove は `version` で検出し、例外とする.
+  - Insert / BulkInsert / Upsert: 配列の拡張で再確保されるため.
+- 列挙中の Insert / Remove / Clear は `version` で検出し、例外とする.
   - SecondaryKey が変わらない Update は列挙中でも行える.
 
 ---
@@ -253,13 +263,17 @@ MySQL (InnoDB) の二次索引と同様に、B+Tree のキーを `(SecondaryKey,
 | Insert         | 新規 Record の挿入. 払い出した PK を返す        |
 | BulkInsert     | 新規 Record の一括挿入. PK は出力先の Span に書く |
 | Update         | 既存 Record の部分更新                        |
+| UpsertByXxx    | Unique な SecondaryKey で照合し、あれば全項目を更新、無ければ挿入 |
 | Find           | PK での単一検索 (`TryFind` / `FindRef`)        |
 | FindByXxx      | Unique な SecondaryKey での単一検索 (`TryFindByXxx` / `FindRefByXxx`) |
 | FindAllByXxx   | 非 Unique な SecondaryKey での検索              |
 | FindFirstByXxx | 非 Unique な SecondaryKey での単一検索 (索引上の先頭. `TryFindFirstByXxx` / `FindFirstRefByXxx`) |
 | FindRangeByXxx | SecondaryKey での範囲検索 (`Ordered` のみ) |
+| CountByXxx     | SecondaryKey の値ごとの件数                    |
 | All            | 全 Record の取得. 順序は保証しない              |
+| CopyTo         | 全 Record を Span にコピー                     |
 | Remove         | PK に対応する Record の削除                    |
+| Clear          | 全 Record の削除. 削除前の PK は無効になる        |
 | TrimExcess     | 余った容量を返す                              |
 | AvailableSlotCount / RetiredSlotCount | 残容量 |
 
@@ -275,13 +289,18 @@ public sealed class SampleTable
     public ref readonly SampleRow FindRef(uint primaryKey, out bool found);
 
     public bool Update(uint primaryKey, Optional<string> name = default, Optional<string> description = default);
+    public InsertResult UpsertByTag(in SampleRow row, out uint primaryKey);
+    public InsertResult UpsertByTag(in SampleRow row, out uint primaryKey, out bool inserted);
     public bool Remove(uint primaryKey);
+    public void Clear();
 
     public AllEnumerable All();
+    public int CopyTo(Span<SampleRow> destination);
     public bool TryFindFirstByName(string name, out SampleRow row);
     public ref readonly SampleRow FindFirstRefByName(string name, out bool found);
     public NameEnumerable FindAllByName(string name);
     public NameEnumerable FindRangeByName(string min, string max);
+    public int CountByName(string name);
 
     public void TrimExcess();
 
@@ -310,7 +329,9 @@ public sealed class SampleTable
 | Insert | **O(1) 償却** + 索引への挿入 × I | 配列の拡張時のみ O(n). 初期容量を指定すれば最悪 O(1) |
 | BulkInsert | **O(k) 償却** + 索引への一括挿入 × I | 配列の拡張は事前に 1 回 |
 | Update | **O(1)** + SecondaryKey が変わった索引ごとに削除 + 挿入 | SecondaryKey が変わらなければ O(1) |
+| Upsert | 照合する索引の検索 + Update または Insert | |
 | Remove | **O(1)** + 索引からの削除 × I | 末尾の Record を移すだけ |
+| Clear | **O(n)** + 索引の初期化 × I | |
 | All | **O(n)** | n は生存件数. 削除の履歴に依らない |
 | TrimExcess | O(n) + 索引の作り直し | |
 
@@ -324,6 +345,8 @@ public sealed class SampleTable
 | FindFirstByXxx | O(log n) | 平均 O(1) |
 | FindAllByXxx | O(log n + m) | 平均 O(1 + m) |
 | FindRangeByXxx | O(log n + m) | 不可 |
+| CountByXxx (Unique) | O(log n) | 平均 O(1) |
+| CountByXxx (非 Unique) | O(log n + m / B) | 平均 O(1) |
 | 一括挿入 (k 件) | O(k log(n+k)), 作り直す場合 O((n+k) + k log k) | 平均 O(k) |
 
 - Ordered: ノードの大きさ B は定数 (64). 高さ log_B n, ノード内の探索とずらしが O(B) で、合わせて O(log n). ノードの分割は償却 O(1).

@@ -166,6 +166,12 @@ namespace OrdoMemory
             denseCount = last;
 
             // 削除した Record に割り当てられていた Slot の更新
+            FreeSlot(slotIndex);
+            version++;
+        }
+
+        void FreeSlot(int slotIndex)
+        {
             ref var slot = ref slots[slotIndex];
             if (slot.generation < maxGeneration)
             {
@@ -179,7 +185,17 @@ namespace OrdoMemory
                 slot.generation = 0;
                 retiredSlotCount++;
             }
+        }
 
+        public void Clear()
+        {
+            for (var i = 0; i < denseCount; i++)
+            {
+                FreeSlot(SlotIndexOf(i));
+            }
+
+            Array.Clear(dense, 0, denseCount);
+            denseCount = 0;
             version++;
         }
 

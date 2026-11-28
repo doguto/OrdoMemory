@@ -161,6 +161,27 @@ namespace OrdoMemory
             return lo;
         }
 
+        int LeafUpperBound(int leaf, in Probe probe)
+        {
+            var lo = 0;
+            var hi = lCount[leaf];
+            var baseSlot = leaf * b;
+            while (lo < hi)
+            {
+                var mid = (lo + hi) >> 1;
+                if (CompareLeaf(baseSlot + mid, probe) <= 0)
+                {
+                    lo = mid + 1;
+                }
+                else
+                {
+                    hi = mid;
+                }
+            }
+
+            return lo;
+        }
+
         int ChildIndex(int node, in Probe probe)
         {
             var lo = 0;
@@ -212,6 +233,31 @@ namespace OrdoMemory
 
             primaryKey = default;
             return false;
+        }
+
+        public int CountOf(TKey key)
+        {
+            if (count == 0) return 0;
+
+            if (unique)
+            {
+                var e = Equal(key);
+                return e.MoveNext() ? 1 : 0;
+            }
+
+            var lowProbe = MakeProbe(key, 0);
+            var highProbe = MakeProbe(key, pkMask);
+            var leaf = Descend(lowProbe);
+            var n = -LeafLowerBound(leaf, lowProbe);
+            while (leaf >= 0)
+            {
+                var leafCount = lCount[leaf];
+                if (CompareLeaf(leaf * b + leafCount - 1, highProbe) > 0) return n + LeafUpperBound(leaf, highProbe);
+                n += leafCount;
+                leaf = lNext[leaf];
+            }
+
+            return n;
         }
 
         public RangeEnumerator Equal(TKey key)
@@ -646,6 +692,19 @@ namespace OrdoMemory
             }
 
             return MergeRebuild(keys, primaryKeys);
+        }
+
+        public void Clear()
+        {
+            if (lFull != null) Array.Clear(lFull, 0, lFull.Length);
+            if (iFull != null) Array.Clear(iFull, 0, iFull.Length);
+            leafUsed = 0;
+            leafFree = -1;
+            innerUsed = 0;
+            innerFree = -1;
+            root = AllocLeaf();
+            height = 0;
+            count = 0;
         }
 
         public void TrimExcess()

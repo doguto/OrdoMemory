@@ -49,9 +49,15 @@ namespace OrdoMemory.Generator.Emitting
                                  
                                      {{EmitUpdate(model)}}
                                  
+                                     {{EmitUpsert(model)}}
+                                 
                                      {{EmitRemove(model)}}
                                  
+                                     {{EmitClear(model)}}
+                                 
                                      public {{storeType}}.AllEnumerable All() => __store.All();
+                                 
+                                     public int CopyTo(global::System.Span<{{rowType}}> destination) => __store.All().CopyTo(destination);
                                  
                                      {{Each(model.Keys, key => EmitKeyQueries(model, key, storeType), "\n\n")}}
                                  
@@ -360,6 +366,40 @@ namespace OrdoMemory.Generator.Emitting
                             """);
         }
 
+        static string EmitUpsert(TableModel model)
+        {
+            var rowType = model.RowFullName;
+            var primaryKeyType = model.PrimaryKeyType;
+            var updateArguments = string.Join(", ", model.Fields.Select(field => $"{field.ParameterName}: row.{field.Name}"));
+            return Each(model.Keys.Where(key => key.Unique), key => Render($$"""
+                                                                          public global::OrdoMemory.InsertResult UpsertBy{{key.Field.Name}}(in {{rowType}} row, out {{primaryKeyType}} primaryKey) => UpsertBy{{key.Field.Name}}(in row, out primaryKey, out _);
+
+                                                                          public global::OrdoMemory.InsertResult UpsertBy{{key.Field.Name}}(in {{rowType}} row, out {{primaryKeyType}} primaryKey, out bool inserted)
+                                                                          {
+                                                                              if ({{key.IndexField}}.TryGetFirst({{ConvertKey(key, "row." + key.Field.Name)}}, out primaryKey))
+                                                                              {
+                                                                                  inserted = false;
+                                                                              return Update(primaryKey, {{updateArguments}}) ? global::OrdoMemory.InsertResult.Success : global::OrdoMemory.InsertResult.Duplicate;
+                                                                              }
+                                                                          
+                                                                              var result = TryInsert(in row, out primaryKey);
+                                                                              inserted = result == global::OrdoMemory.InsertResult.Success;
+                                                                              return result;
+                                                                          }
+                                                                          """), "\n\n");
+        }
+
+        static string EmitClear(TableModel model)
+        {
+            return Render($$"""
+                            public void Clear()
+                            {
+                                __store.Clear();
+                                {{Each(model.Keys, key => $"{key.IndexField}.Clear();")}}
+                            }
+                            """);
+        }
+
         static string EmitRemove(TableModel model)
         {
             var removeFromIndexes = If(model.Keys.Count > 0, Render($$"""
@@ -411,6 +451,8 @@ namespace OrdoMemory.Generator.Emitting
                             }
 
                             public bool {{findFirstPrimaryKeyMethod}}({{fieldType}} key, out {{model.PrimaryKeyType}} primaryKey) => {{indexField}}.TryGetFirst({{ConvertKey(key, "key")}}, out primaryKey);
+
+                            public int CountBy{{fieldName}}({{fieldType}} key) => {{indexField}}.CountOf({{ConvertKey(key, "key")}});
 
                             {{If(!key.Unique, $"public {enumerableType} FindAllBy{fieldName}({fieldType} key) => __store.Subset({indexField}.Equal({ConvertKey(key, "key")}));")}}
 
