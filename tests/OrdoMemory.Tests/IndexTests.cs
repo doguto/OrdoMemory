@@ -574,6 +574,48 @@ namespace OrdoMemory.Tests
             Assert.True(unique.Insert("x", 4));
         }
 
+        [Fact]
+        public void OrderedIndexCountOfMatchesEnumeration()
+        {
+            CountOfMatchesEnumeration(new OrderedIndex<int, Int32Key, uint, UInt32PrimaryKey>(false, 4), rnd => rnd.Next(12));
+            CountOfMatchesEnumeration(new OrderedIndex<long, Int64Key, uint, UInt32PrimaryKey>(false, 4), rnd => (long)rnd.Next(12) << 40);
+            CountOfMatchesEnumeration(new OrderedIndex<string, StringKey, uint, UInt32PrimaryKey>(false, 4), rnd => rnd.Next(13) == 0 ? null : "key" + rnd.Next(12));
+        }
+
+        static void CountOfMatchesEnumeration<TKey, TKT>(OrderedIndex<TKey, TKT, uint, UInt32PrimaryKey> index, Func<Random, TKey> nextKey)
+            where TKT : struct, IOrderedKeyTraits<TKey>
+        {
+            var rnd = new Random(7);
+            var live = new List<(TKey Key, uint Pk)>();
+            for (var step = 0; step < 4000; step++)
+            {
+                if (live.Count > 0 && rnd.Next(3) == 0)
+                {
+                    var i = rnd.Next(live.Count);
+                    Assert.True(index.Remove(live[i].Key, live[i].Pk));
+                    live[i] = live[live.Count - 1];
+                    live.RemoveAt(live.Count - 1);
+                }
+                else
+                {
+                    var key = nextKey(rnd);
+                    var pk = step == 100 ? uint.MaxValue : (uint)step + 1;
+                    Assert.True(index.Insert(key, pk));
+                    live.Add((key, pk));
+                }
+
+                if (step % 50 != 0) continue;
+                for (var k = 0; k < 20; k++)
+                {
+                    var key = nextKey(rnd);
+                    var expected = 0;
+                    var e = index.Equal(key);
+                    while (e.MoveNext()) expected++;
+                    Assert.Equal(expected, index.CountOf(key));
+                }
+            }
+        }
+
         [Theory]
         [InlineData(true)]
         [InlineData(false)]

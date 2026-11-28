@@ -357,7 +357,7 @@ public sealed class SampleTable
 | FindAllByXxx | O(log n + m) | 平均 O(1 + m) |
 | FindRangeByXxx | O(log n + m) | 不可 |
 | CountByXxx (Unique) | O(log n) | 平均 O(1) |
-| CountByXxx (非 Unique) | O(log n + m) | 平均 O(1) |
+| CountByXxx (非 Unique) | O(log n + m / B) | 平均 O(1) |
 | 一括挿入 (k 件) | O(k log(n+k)), 作り直す場合 O((n+k) + k log k) | 平均 O(k) |
 
 - Ordered: ノードの大きさ B は定数 (64). 高さ log_B n, ノード内の探索とずらしが O(B) で、合わせて O(log n). ノードの分割は償却 O(1).
