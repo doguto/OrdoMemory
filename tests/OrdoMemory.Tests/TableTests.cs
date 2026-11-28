@@ -152,6 +152,76 @@ namespace OrdoMemory.Tests
         }
 
         [Fact]
+        public void InsertRollsBackEarlierUniqueIndexOnLaterConflict()
+        {
+            var table = new ItemTable();
+            Assert.True(table.TryInsert(NewItem(1, tag: "x"), out var a));
+
+            // Code (1 つ目の Unique 索引) は挿入できるが、Tag (2 つ目) が重複する
+            var enumerator = table.All().GetEnumerator();
+            Assert.False(table.TryInsert(NewItem(2, tag: "x"), out var dup));
+            Assert.Equal(ItemTable.InvalidPrimaryKey, dup);
+            Assert.True(enumerator.MoveNext());
+
+            Assert.Equal(1, table.Count);
+            Assert.False(table.TryFindByCode(2, out _));
+            Assert.True(table.TryFindPrimaryKeyByTag("x", out var tagged));
+            Assert.Equal(a, tagged);
+            Assert.Equal(1, CountRange(table));
+
+            Assert.True(table.TryInsert(NewItem(2, tag: "y"), out var b));
+            Assert.True(table.TryFindPrimaryKeyByCode(2, out var coded));
+            Assert.Equal(b, coded);
+            Assert.Equal(2, table.Count);
+        }
+
+        [Fact]
+        public void UpdateRollsBackEarlierUniqueIndexOnLaterConflict()
+        {
+            var table = new ItemTable();
+            Assert.True(table.TryInsert(NewItem(1, "a", tag: "x"), out var a));
+            Assert.True(table.TryInsert(NewItem(2, "b", tag: "y"), out var b));
+
+            // Code (1 つ目の Unique 索引) の変更後の値は空いているが、Tag (2 つ目) が重複する
+            var enumerator = table.All().GetEnumerator();
+            Assert.False(table.Update(b, 3, "c", tag: "x"));
+            Assert.True(enumerator.MoveNext());
+
+            Assert.True(table.TryFind(b, out var row));
+            Assert.Equal(2, row.Code);
+            Assert.Equal("b", row.Name);
+            Assert.Equal("y", row.Tag);
+            Assert.False(table.TryFindByCode(3, out _));
+            Assert.True(table.TryFindPrimaryKeyByCode(2, out var coded));
+            Assert.Equal(b, coded);
+            Assert.True(table.TryFindPrimaryKeyByTag("x", out var tagged));
+            Assert.Equal(a, tagged);
+            Assert.True(table.TryFindPrimaryKeyByTag("y", out tagged));
+            Assert.Equal(b, tagged);
+            Assert.False(table.TryFindFirstByName("c", out _));
+            Assert.Equal(2, CountRange(table));
+
+            // 1 つ目が重複する場合も何も変わらない
+            Assert.False(table.Update(b, 1, tag: "z"));
+            Assert.False(table.TryFindByTag("z", out _));
+            Assert.True(table.TryFindPrimaryKeyByTag("y", out tagged));
+            Assert.Equal(b, tagged);
+
+            Assert.True(table.Update(b, 3, tag: "z"));
+            Assert.True(table.TryFindPrimaryKeyByCode(3, out coded));
+            Assert.Equal(b, coded);
+            Assert.False(table.TryFindByCode(2, out _));
+            Assert.False(table.TryFindByTag("y", out _));
+        }
+
+        static int CountRange(ItemTable table)
+        {
+            var n = 0;
+            foreach (ref readonly var _ in table.FindRangeByCode(int.MinValue, int.MaxValue)) n++;
+            return n;
+        }
+
+        [Fact]
         public void UpdateOnlySpecifiedFields()
         {
             var table = new ItemTable();
@@ -395,6 +465,7 @@ namespace OrdoMemory.Tests
             }
 
             Assert.False(table.TryInsert(new TinyRow(9), out _));
+            Assert.False(table.TryFindByValue(9, out _));
             Assert.False(table.TryBulkInsert(new[] { new TinyRow(10) }, new uint[1]));
             Assert.Equal(4, table.Count);
         }

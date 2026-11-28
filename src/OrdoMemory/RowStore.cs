@@ -134,6 +134,13 @@ namespace OrdoMemory
             return true;
         }
 
+        // 次の Store で払い出される主キー. 状態は変えない.
+        // Store より先に索引へ挿入し、重複を Insert の戻り値で検出するために使う.
+        // TryReserve が成功した後に読むこと (スロットを使い切っている場合の値は無意味). TryReserve はこの値を変えない
+        public TPrimaryKey NextPrimaryKey => freeHead >= 0
+            ? MakePrimaryKey(slots[freeHead].generation, freeHead)
+            : MakePrimaryKey(1, slotCount);
+
         // 事前に TryReserve で容量を確保しておくこと
         public TPrimaryKey Store(in TRow row)
         {
