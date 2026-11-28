@@ -375,15 +375,15 @@ namespace OrdoMemory.Tests
         {
             const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
             var type = index.GetType();
-            var nodeSize = (int)type.GetField("b", flags).GetValue(index);
+            var nodeSize = (int)type.GetField("nodeSize", flags).GetValue(index);
             var node = (int)type.GetField("root", flags).GetValue(index);
             var height = (int)type.GetField("height", flags).GetValue(index);
-            var iChild = (int[])type.GetField("iChild", flags).GetValue(index);
-            var lNext = (int[])type.GetField("lNext", flags).GetValue(index);
-            for (var level = height; level > 0; level--) node = iChild[node * nodeSize];
+            var innerChild = (int[])type.GetField("innerChild", flags).GetValue(index);
+            var leafNext = (int[])type.GetField("leafNext", flags).GetValue(index);
+            for (var level = height; level > 0; level--) node = innerChild[node * nodeSize];
 
             var leaves = 0;
-            for (; node >= 0; node = lNext[node]) leaves++;
+            for (; node >= 0; node = leafNext[node]) leaves++;
             return leaves;
         }
 

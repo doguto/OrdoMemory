@@ -16,27 +16,27 @@ namespace OrdoMemory
 
         const int RebuildRatio = 16;
 
-        readonly int b;
+        readonly int nodeSize;
         readonly bool unique;
         readonly bool packsPk;
         readonly bool comparesPk;
         readonly int pkBits;
         readonly ulong pkMask;
 
-        ulong[] lNorm;
-        TKey[] lFull;
-        TPrimaryKey[] lPk;
-        int[] lCount;
-        int[] lNext;
-        int[] lPrev;
+        ulong[] leafNorm;
+        TKey[] leafFull;
+        TPrimaryKey[] leafPk;
+        int[] leafCount;
+        int[] leafNext;
+        int[] leafPrev;
         int leafUsed;
         int leafFree;
 
-        ulong[] iNorm;
-        TKey[] iFull;
-        ulong[] iPk;
-        int[] iChild;
-        int[] iCount;
+        ulong[] innerNorm;
+        TKey[] innerFull;
+        ulong[] innerPk;
+        int[] innerChild;
+        int[] innerCount;
         int innerUsed;
         int innerFree;
 
@@ -53,7 +53,7 @@ namespace OrdoMemory
         {
             if (nodeSize < 4) throw new ArgumentOutOfRangeException(nameof(nodeSize));
 
-            b = nodeSize;
+            this.nodeSize = nodeSize;
             this.unique = unique;
             pkBits = default(TPrimaryKeyTraits).Bits;
             pkMask = pkBits == 64 ? ulong.MaxValue : (1UL << pkBits) - 1;
@@ -73,7 +73,7 @@ namespace OrdoMemory
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        static ulong ToU(TPrimaryKey primaryKey)
+        static ulong PkToUInt64(TPrimaryKey primaryKey)
         {
             return default(TPrimaryKeyTraits).ToUInt64(primaryKey);
         }
@@ -106,8 +106,8 @@ namespace OrdoMemory
             if (norm != probe.Norm) return norm < probe.Norm ? -1 : 1;
             if (NeedsFullComparison)
             {
-                var c = default(TKeyTraits).CompareFull(full, probe.Key);
-                if (c != 0) return c;
+                var fullComparison = default(TKeyTraits).CompareFull(full, probe.Key);
+                if (fullComparison != 0) return fullComparison;
             }
 
             if (!comparesPk) return 0;
@@ -117,34 +117,34 @@ namespace OrdoMemory
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         int CompareLeaf(int slot, in Probe probe)
         {
-            return Compare(lNorm[slot], NeedsFullComparison ? lFull[slot] : default, comparesPk ? ToU(lPk[slot]) : 0, probe);
+            return Compare(leafNorm[slot], NeedsFullComparison ? leafFull[slot] : default, comparesPk ? PkToUInt64(leafPk[slot]) : 0, probe);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         int CompareInner(int slot, in Probe probe)
         {
-            return Compare(iNorm[slot], NeedsFullComparison ? iFull[slot] : default, comparesPk ? iPk[slot] : 0, probe);
+            return Compare(innerNorm[slot], NeedsFullComparison ? innerFull[slot] : default, comparesPk ? innerPk[slot] : 0, probe);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         int CompareKey(int slot, ulong keyNorm, TKey key)
         {
-            var n = packsPk ? lNorm[slot] >> pkBits : lNorm[slot];
-            if (n != keyNorm) return n < keyNorm ? -1 : 1;
-            return NeedsFullComparison ? default(TKeyTraits).CompareFull(lFull[slot], key) : 0;
+            var storedKeyNorm = packsPk ? leafNorm[slot] >> pkBits : leafNorm[slot];
+            if (storedKeyNorm != keyNorm) return storedKeyNorm < keyNorm ? -1 : 1;
+            return NeedsFullComparison ? default(TKeyTraits).CompareFull(leafFull[slot], key) : 0;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         TPrimaryKey PkAtSlot(int slot)
         {
-            return packsPk ? default(TPrimaryKeyTraits).FromUInt64(lNorm[slot] & pkMask) : lPk[slot];
+            return packsPk ? default(TPrimaryKeyTraits).FromUInt64(leafNorm[slot] & pkMask) : leafPk[slot];
         }
 
         int LeafLowerBound(int leaf, in Probe probe)
         {
             var lo = 0;
-            var hi = lCount[leaf];
-            var baseSlot = leaf * b;
+            var hi = leafCount[leaf];
+            var baseSlot = leaf * nodeSize;
             while (lo < hi)
             {
                 var mid = (lo + hi) >> 1;
@@ -185,8 +185,8 @@ namespace OrdoMemory
         int ChildIndex(int node, in Probe probe)
         {
             var lo = 0;
-            var hi = iCount[node];
-            var baseSlot = node * b;
+            var hi = innerCount[node];
+            var baseSlot = node * nodeSize;
             while (lo < hi)
             {
                 var mid = (lo + hi) >> 1;
@@ -211,7 +211,7 @@ namespace OrdoMemory
                 var pos = ChildIndex(node, probe);
                 pathNode[level] = node;
                 pathPos[level] = pos;
-                node = iChild[node * b + pos];
+                node = innerChild[node * nodeSize + pos];
             }
 
             return node;
@@ -224,10 +224,10 @@ namespace OrdoMemory
 
         public bool TryGetFirst(TKey key, out TPrimaryKey primaryKey)
         {
-            var e = Range(key, key);
-            if (e.MoveNext())
+            var enumerator = Range(key, key);
+            if (enumerator.MoveNext())
             {
-                primaryKey = e.Current;
+                primaryKey = enumerator.Current;
                 return true;
             }
 
@@ -306,9 +306,9 @@ namespace OrdoMemory
             {
                 while (leaf >= 0)
                 {
-                    if (pos < index.lCount[leaf])
+                    if (pos < index.leafCount[leaf])
                     {
-                        var slot = leaf * index.b + pos;
+                        var slot = leaf * index.nodeSize + pos;
                         if (index.CompareKey(slot, maxNorm, max) > 0)
                         {
                             leaf = -1;
@@ -320,7 +320,7 @@ namespace OrdoMemory
                         return true;
                     }
 
-                    leaf = index.lNext[leaf];
+                    leaf = index.leafNext[leaf];
                     pos = 0;
                 }
 
@@ -335,29 +335,29 @@ namespace OrdoMemory
 
         public bool Insert(TKey key, TPrimaryKey primaryKey)
         {
-            var probe = MakeProbe(key, ToU(primaryKey));
+            var probe = MakeProbe(key, PkToUInt64(primaryKey));
             var leaf = Descend(probe);
             var pos = LeafLowerBound(leaf, probe);
-            if (pos < lCount[leaf] && CompareLeaf(leaf * b + pos, probe) == 0) return false;
+            if (pos < leafCount[leaf] && CompareLeaf(leaf * nodeSize + pos, probe) == 0) return false;
 
             count++;
-            if (lCount[leaf] < b)
+            if (leafCount[leaf] < nodeSize)
             {
                 LeafInsertAt(leaf, pos, probe.Norm, key, primaryKey);
                 return true;
             }
 
-            var split = pos == b && lNext[leaf] < 0 ? b : b / 2;
+            var split = pos == nodeSize && leafNext[leaf] < 0 ? nodeSize : nodeSize / 2;
             var right = AllocLeaf();
-            MoveLeafEntries(leaf, split, right, b - split);
-            lCount[leaf] = split;
-            lCount[right] = b - split;
+            MoveLeafEntries(leaf, split, right, nodeSize - split);
+            leafCount[leaf] = split;
+            leafCount[right] = nodeSize - split;
 
-            var next = lNext[leaf];
-            lNext[right] = next;
-            lPrev[right] = leaf;
-            if (next >= 0) lPrev[next] = right;
-            lNext[leaf] = right;
+            var next = leafNext[leaf];
+            leafNext[right] = next;
+            leafPrev[right] = leaf;
+            if (next >= 0) leafPrev[next] = right;
+            leafNext[leaf] = right;
 
             if (pos < split)
             {
@@ -368,42 +368,42 @@ namespace OrdoMemory
                 LeafInsertAt(right, pos - split, probe.Norm, key, primaryKey);
             }
 
-            var rs = right * b;
-            PromoteSplit(1, lNorm[rs], NeedsFullComparison ? lFull[rs] : default, comparesPk ? ToU(lPk[rs]) : 0, right, leaf);
+            var rightFirstSlot = right * nodeSize;
+            PromoteSplit(1, leafNorm[rightFirstSlot], NeedsFullComparison ? leafFull[rightFirstSlot] : default, comparesPk ? PkToUInt64(leafPk[rightFirstSlot]) : 0, right, leaf);
             return true;
         }
 
         void LeafInsertAt(int leaf, int pos, ulong norm, TKey key, TPrimaryKey primaryKey)
         {
-            var baseSlot = leaf * b;
-            var n = lCount[leaf];
-            var move = n - pos;
+            var baseSlot = leaf * nodeSize;
+            var entryCount = leafCount[leaf];
+            var move = entryCount - pos;
             if (move > 0)
             {
-                Array.Copy(lNorm, baseSlot + pos, lNorm, baseSlot + pos + 1, move);
-                if (NeedsFullComparison) Array.Copy(lFull, baseSlot + pos, lFull, baseSlot + pos + 1, move);
-                if (!packsPk) Array.Copy(lPk, baseSlot + pos, lPk, baseSlot + pos + 1, move);
+                Array.Copy(leafNorm, baseSlot + pos, leafNorm, baseSlot + pos + 1, move);
+                if (NeedsFullComparison) Array.Copy(leafFull, baseSlot + pos, leafFull, baseSlot + pos + 1, move);
+                if (!packsPk) Array.Copy(leafPk, baseSlot + pos, leafPk, baseSlot + pos + 1, move);
             }
 
-            lNorm[baseSlot + pos] = norm;
-            if (NeedsFullComparison) lFull[baseSlot + pos] = key;
-            if (!packsPk) lPk[baseSlot + pos] = primaryKey;
-            lCount[leaf] = n + 1;
+            leafNorm[baseSlot + pos] = norm;
+            if (NeedsFullComparison) leafFull[baseSlot + pos] = key;
+            if (!packsPk) leafPk[baseSlot + pos] = primaryKey;
+            leafCount[leaf] = entryCount + 1;
         }
 
-        void MoveLeafEntries(int from, int fromPos, int to, int n)
+        void MoveLeafEntries(int fromLeaf, int fromPos, int toLeaf, int length)
         {
-            if (n <= 0) return;
-            var src = from * b + fromPos;
-            var dst = to * b;
-            Array.Copy(lNorm, src, lNorm, dst, n);
+            if (length <= 0) return;
+            var src = fromLeaf * nodeSize + fromPos;
+            var dst = toLeaf * nodeSize;
+            Array.Copy(leafNorm, src, leafNorm, dst, length);
             if (NeedsFullComparison)
             {
-                Array.Copy(lFull, src, lFull, dst, n);
-                Array.Clear(lFull, src, n);
+                Array.Copy(leafFull, src, leafFull, dst, length);
+                Array.Clear(leafFull, src, length);
             }
 
-            if (!packsPk) Array.Copy(lPk, src, lPk, dst, n);
+            if (!packsPk) Array.Copy(leafPk, src, leafPk, dst, length);
         }
 
         void PromoteSplit(int level, ulong sepNorm, TKey sepFull, ulong sepPk, int child, int leftChild)
@@ -413,10 +413,10 @@ namespace OrdoMemory
                 if (level > height)
                 {
                     var newRoot = AllocInner();
-                    var s = newRoot * b;
-                    SetInner(s, 0, default, 0, leftChild);
-                    SetInner(s + 1, sepNorm, sepFull, sepPk, child);
-                    iCount[newRoot] = 2;
+                    var rootFirstSlot = newRoot * nodeSize;
+                    SetInner(rootFirstSlot, 0, default, 0, leftChild);
+                    SetInner(rootFirstSlot + 1, sepNorm, sepFull, sepPk, child);
+                    innerCount[newRoot] = 2;
                     root = newRoot;
                     height++;
                     EnsurePathCapacity();
@@ -425,33 +425,33 @@ namespace OrdoMemory
 
                 var node = pathNode[level];
                 var pos = pathPos[level] + 1;
-                if (iCount[node] < b)
+                if (innerCount[node] < nodeSize)
                 {
                     InnerInsertAt(node, pos, sepNorm, sepFull, sepPk, child);
                     return;
                 }
 
-                var split = pos == b ? b : b / 2;
+                var split = pos == nodeSize ? nodeSize : nodeSize / 2;
                 var right = AllocInner();
-                var src = node * b + split;
-                var dst = right * b;
-                var n = b - split;
-                if (n > 0)
+                var src = node * nodeSize + split;
+                var dst = right * nodeSize;
+                var movedCount = nodeSize - split;
+                if (movedCount > 0)
                 {
-                    Array.Copy(iNorm, src, iNorm, dst, n);
+                    Array.Copy(innerNorm, src, innerNorm, dst, movedCount);
                     if (NeedsFullComparison)
                     {
-                        Array.Copy(iFull, src, iFull, dst, n);
-                        Array.Clear(iFull, src, n);
+                        Array.Copy(innerFull, src, innerFull, dst, movedCount);
+                        Array.Clear(innerFull, src, movedCount);
                     }
 
-                    if (comparesPk) Array.Copy(iPk, src, iPk, dst, n);
-                    Array.Copy(iChild, src, iChild, dst, n);
+                    if (comparesPk) Array.Copy(innerPk, src, innerPk, dst, movedCount);
+                    Array.Copy(innerChild, src, innerChild, dst, movedCount);
                 }
 
-                iCount[node] = split;
-                iCount[right] = n;
-                if (pos <= split && split != b)
+                innerCount[node] = split;
+                innerCount[right] = movedCount;
+                if (pos <= split && split != nodeSize)
                 {
                     InnerInsertAt(node, pos, sepNorm, sepFull, sepPk, child);
                 }
@@ -460,10 +460,10 @@ namespace OrdoMemory
                     InnerInsertAt(right, pos - split, sepNorm, sepFull, sepPk, child);
                 }
 
-                var rs = right * b;
-                sepNorm = iNorm[rs];
-                sepFull = NeedsFullComparison ? iFull[rs] : default;
-                sepPk = comparesPk ? iPk[rs] : 0;
+                var rightFirstSlot = right * nodeSize;
+                sepNorm = innerNorm[rightFirstSlot];
+                sepFull = NeedsFullComparison ? innerFull[rightFirstSlot] : default;
+                sepPk = comparesPk ? innerPk[rightFirstSlot] : 0;
                 child = right;
                 leftChild = node;
                 level++;
@@ -472,160 +472,160 @@ namespace OrdoMemory
 
         void InnerInsertAt(int node, int pos, ulong norm, TKey full, ulong primaryKey, int child)
         {
-            var baseSlot = node * b;
-            var move = iCount[node] - pos;
+            var baseSlot = node * nodeSize;
+            var move = innerCount[node] - pos;
             if (move > 0)
             {
-                Array.Copy(iNorm, baseSlot + pos, iNorm, baseSlot + pos + 1, move);
-                if (NeedsFullComparison) Array.Copy(iFull, baseSlot + pos, iFull, baseSlot + pos + 1, move);
-                if (comparesPk) Array.Copy(iPk, baseSlot + pos, iPk, baseSlot + pos + 1, move);
-                Array.Copy(iChild, baseSlot + pos, iChild, baseSlot + pos + 1, move);
+                Array.Copy(innerNorm, baseSlot + pos, innerNorm, baseSlot + pos + 1, move);
+                if (NeedsFullComparison) Array.Copy(innerFull, baseSlot + pos, innerFull, baseSlot + pos + 1, move);
+                if (comparesPk) Array.Copy(innerPk, baseSlot + pos, innerPk, baseSlot + pos + 1, move);
+                Array.Copy(innerChild, baseSlot + pos, innerChild, baseSlot + pos + 1, move);
             }
 
             SetInner(baseSlot + pos, norm, full, primaryKey, child);
-            iCount[node]++;
+            innerCount[node]++;
         }
 
         void SetInner(int slot, ulong norm, TKey full, ulong primaryKey, int child)
         {
-            iNorm[slot] = norm;
-            if (NeedsFullComparison) iFull[slot] = full;
-            if (comparesPk) iPk[slot] = primaryKey;
-            iChild[slot] = child;
+            innerNorm[slot] = norm;
+            if (NeedsFullComparison) innerFull[slot] = full;
+            if (comparesPk) innerPk[slot] = primaryKey;
+            innerChild[slot] = child;
         }
 
         public bool Remove(TKey key, TPrimaryKey primaryKey)
         {
             if (count == 0) return false;
 
-            var pkValue = ToU(primaryKey);
+            var pkValue = PkToUInt64(primaryKey);
             var probe = MakeProbe(key, pkValue);
             var leaf = Descend(probe);
             var pos = LeafLowerBound(leaf, probe);
-            var baseSlot = leaf * b;
-            if (pos >= lCount[leaf] || CompareLeaf(baseSlot + pos, probe) != 0) return false;
-            if (unique && ToU(lPk[baseSlot + pos]) != pkValue) return false;
+            var baseSlot = leaf * nodeSize;
+            if (pos >= leafCount[leaf] || CompareLeaf(baseSlot + pos, probe) != 0) return false;
+            if (unique && PkToUInt64(leafPk[baseSlot + pos]) != pkValue) return false;
 
-            var n = lCount[leaf] - 1;
-            var move = n - pos;
+            var newCount = leafCount[leaf] - 1;
+            var move = newCount - pos;
             if (move > 0)
             {
-                Array.Copy(lNorm, baseSlot + pos + 1, lNorm, baseSlot + pos, move);
-                if (NeedsFullComparison) Array.Copy(lFull, baseSlot + pos + 1, lFull, baseSlot + pos, move);
-                if (!packsPk) Array.Copy(lPk, baseSlot + pos + 1, lPk, baseSlot + pos, move);
+                Array.Copy(leafNorm, baseSlot + pos + 1, leafNorm, baseSlot + pos, move);
+                if (NeedsFullComparison) Array.Copy(leafFull, baseSlot + pos + 1, leafFull, baseSlot + pos, move);
+                if (!packsPk) Array.Copy(leafPk, baseSlot + pos + 1, leafPk, baseSlot + pos, move);
             }
 
-            if (NeedsFullComparison) lFull[baseSlot + n] = default;
-            lCount[leaf] = n;
+            if (NeedsFullComparison) leafFull[baseSlot + newCount] = default;
+            leafCount[leaf] = newCount;
             count--;
 
             if (height == 0) return true;
 
-            if (n == 0)
+            if (newCount == 0)
             {
                 UnlinkAndFreeLeaf(leaf);
                 RemoveFromParent(1);
             }
-            else if (n <= b / 4)
+            else if (newCount <= nodeSize / 4)
             {
-                Rebalance(leaf, n);
+                Rebalance(leaf, newCount);
             }
 
             return true;
         }
 
-        void Rebalance(int leaf, int n)
+        void Rebalance(int leaf, int leafEntryCount)
         {
             var parent = pathNode[1];
             var pos = pathPos[1];
-            var parentBase = parent * b;
+            var parentBase = parent * nodeSize;
             if (pos > 0)
             {
-                var left = iChild[parentBase + pos - 1];
-                var s = lCount[left];
-                if (s + n <= b)
+                var left = innerChild[parentBase + pos - 1];
+                var siblingCount = leafCount[left];
+                if (siblingCount + leafEntryCount <= nodeSize)
                 {
-                    CopyLeafEntries(leaf, 0, left, s, n);
-                    lCount[left] = s + n;
-                    lCount[leaf] = 0;
+                    CopyLeafEntries(leaf, 0, left, siblingCount, leafEntryCount);
+                    leafCount[left] = siblingCount + leafEntryCount;
+                    leafCount[leaf] = 0;
                     UnlinkAndFreeLeaf(leaf);
                     RemoveFromParent(1);
                     return;
                 }
 
-                var m = (s - n) / 2;
-                CopyLeafEntries(leaf, 0, leaf, m, n);
-                CopyLeafEntries(left, s - m, leaf, 0, m);
-                lCount[left] = s - m;
-                lCount[leaf] = n + m;
+                var borrowCount = (siblingCount - leafEntryCount) / 2;
+                CopyLeafEntries(leaf, 0, leaf, borrowCount, leafEntryCount);
+                CopyLeafEntries(left, siblingCount - borrowCount, leaf, 0, borrowCount);
+                leafCount[left] = siblingCount - borrowCount;
+                leafCount[leaf] = leafEntryCount + borrowCount;
                 SetSeparator(parentBase + pos, leaf);
                 return;
             }
 
-            if (pos + 1 < iCount[parent])
+            if (pos + 1 < innerCount[parent])
             {
-                var right = iChild[parentBase + pos + 1];
-                var s = lCount[right];
-                if (s + n <= b)
+                var right = innerChild[parentBase + pos + 1];
+                var siblingCount = leafCount[right];
+                if (siblingCount + leafEntryCount <= nodeSize)
                 {
-                    CopyLeafEntries(right, 0, leaf, n, s);
-                    lCount[leaf] = n + s;
-                    lCount[right] = 0;
+                    CopyLeafEntries(right, 0, leaf, leafEntryCount, siblingCount);
+                    leafCount[leaf] = leafEntryCount + siblingCount;
+                    leafCount[right] = 0;
                     UnlinkAndFreeLeaf(right);
                     pathPos[1] = pos + 1;
                     RemoveFromParent(1);
                     return;
                 }
 
-                var m = (s - n) / 2;
-                CopyLeafEntries(right, 0, leaf, n, m);
-                CopyLeafEntries(right, m, right, 0, s - m);
-                lCount[leaf] = n + m;
-                lCount[right] = s - m;
+                var borrowCount = (siblingCount - leafEntryCount) / 2;
+                CopyLeafEntries(right, 0, leaf, leafEntryCount, borrowCount);
+                CopyLeafEntries(right, borrowCount, right, 0, siblingCount - borrowCount);
+                leafCount[leaf] = leafEntryCount + borrowCount;
+                leafCount[right] = siblingCount - borrowCount;
                 SetSeparator(parentBase + pos + 1, right);
             }
         }
 
-        void CopyLeafEntries(int from, int fromPos, int to, int toPos, int n)
+        void CopyLeafEntries(int fromLeaf, int fromPos, int toLeaf, int toPos, int length)
         {
-            if (n <= 0) return;
-            var src = from * b + fromPos;
-            var dst = to * b + toPos;
-            Array.Copy(lNorm, src, lNorm, dst, n);
+            if (length <= 0) return;
+            var src = fromLeaf * nodeSize + fromPos;
+            var dst = toLeaf * nodeSize + toPos;
+            Array.Copy(leafNorm, src, leafNorm, dst, length);
             if (NeedsFullComparison)
             {
-                Array.Copy(lFull, src, lFull, dst, n);
-                if (src + n <= dst || dst + n <= src)
+                Array.Copy(leafFull, src, leafFull, dst, length);
+                if (src + length <= dst || dst + length <= src)
                 {
-                    Array.Clear(lFull, src, n);
+                    Array.Clear(leafFull, src, length);
                 }
                 else if (src < dst)
                 {
-                    Array.Clear(lFull, src, dst - src);
+                    Array.Clear(leafFull, src, dst - src);
                 }
                 else
                 {
-                    Array.Clear(lFull, dst + n, src - dst);
+                    Array.Clear(leafFull, dst + length, src - dst);
                 }
             }
 
-            if (!packsPk) Array.Copy(lPk, src, lPk, dst, n);
+            if (!packsPk) Array.Copy(leafPk, src, leafPk, dst, length);
         }
 
         void SetSeparator(int innerSlot, int leaf)
         {
-            var ls = leaf * b;
-            iNorm[innerSlot] = lNorm[ls];
-            if (NeedsFullComparison) iFull[innerSlot] = lFull[ls];
-            if (comparesPk) iPk[innerSlot] = ToU(lPk[ls]);
+            var leafFirstSlot = leaf * nodeSize;
+            innerNorm[innerSlot] = leafNorm[leafFirstSlot];
+            if (NeedsFullComparison) innerFull[innerSlot] = leafFull[leafFirstSlot];
+            if (comparesPk) innerPk[innerSlot] = PkToUInt64(leafPk[leafFirstSlot]);
         }
 
         void UnlinkAndFreeLeaf(int leaf)
         {
-            var prev = lPrev[leaf];
-            var next = lNext[leaf];
-            if (prev >= 0) lNext[prev] = next;
-            if (next >= 0) lPrev[next] = prev;
+            var prev = leafPrev[leaf];
+            var next = leafNext[leaf];
+            if (prev >= 0) leafNext[prev] = next;
+            if (next >= 0) leafPrev[next] = prev;
             FreeLeaf(leaf);
         }
 
@@ -635,34 +635,34 @@ namespace OrdoMemory
             {
                 var node = pathNode[level];
                 var pos = pathPos[level];
-                var baseSlot = node * b;
-                var n = iCount[node] - 1;
-                var move = n - pos;
+                var baseSlot = node * nodeSize;
+                var newCount = innerCount[node] - 1;
+                var move = newCount - pos;
                 if (move > 0)
                 {
-                    Array.Copy(iNorm, baseSlot + pos + 1, iNorm, baseSlot + pos, move);
-                    if (NeedsFullComparison) Array.Copy(iFull, baseSlot + pos + 1, iFull, baseSlot + pos, move);
-                    if (comparesPk) Array.Copy(iPk, baseSlot + pos + 1, iPk, baseSlot + pos, move);
-                    Array.Copy(iChild, baseSlot + pos + 1, iChild, baseSlot + pos, move);
+                    Array.Copy(innerNorm, baseSlot + pos + 1, innerNorm, baseSlot + pos, move);
+                    if (NeedsFullComparison) Array.Copy(innerFull, baseSlot + pos + 1, innerFull, baseSlot + pos, move);
+                    if (comparesPk) Array.Copy(innerPk, baseSlot + pos + 1, innerPk, baseSlot + pos, move);
+                    Array.Copy(innerChild, baseSlot + pos + 1, innerChild, baseSlot + pos, move);
                 }
 
-                if (NeedsFullComparison) iFull[baseSlot + n] = default;
-                iCount[node] = n;
+                if (NeedsFullComparison) innerFull[baseSlot + newCount] = default;
+                innerCount[node] = newCount;
 
                 if (level == height)
                 {
-                    while (height > 0 && iCount[root] == 1)
+                    while (height > 0 && innerCount[root] == 1)
                     {
-                        var old = root;
-                        root = iChild[old * b];
-                        FreeInner(old);
+                        var oldRoot = root;
+                        root = innerChild[oldRoot * nodeSize];
+                        FreeInner(oldRoot);
                         height--;
                     }
 
                     return;
                 }
 
-                if (n > 0) return;
+                if (newCount > 0) return;
                 FreeInner(node);
                 level++;
             }
@@ -672,12 +672,12 @@ namespace OrdoMemory
         {
             if (primaryKeys.Length < keys.Length) throw new ArgumentException("primaryKeys is shorter than keys.", nameof(primaryKeys));
 
-            var k = keys.Length;
-            if (k == 0) return true;
+            var incomingCount = keys.Length;
+            if (incomingCount == 0) return true;
 
-            if (k < count / RebuildRatio)
+            if (incomingCount < count / RebuildRatio)
             {
-                for (var i = 0; i < k; i++)
+                for (var i = 0; i < incomingCount; i++)
                 {
                     if (Insert(keys[i], primaryKeys[i])) continue;
                     for (var j = 0; j < i; j++)
@@ -712,17 +712,17 @@ namespace OrdoMemory
             var buf = new EntryBuffer(count);
             try
             {
-                var w = 0;
-                for (var leaf = LeftmostLeaf(); leaf >= 0; leaf = lNext[leaf])
+                var written = 0;
+                for (var leaf = LeftmostLeaf(); leaf >= 0; leaf = leafNext[leaf])
                 {
-                    var baseSlot = leaf * b;
-                    for (var i = 0; i < lCount[leaf]; i++)
+                    var baseSlot = leaf * nodeSize;
+                    for (var i = 0; i < leafCount[leaf]; i++)
                     {
-                        buf.Set(w++, lNorm[baseSlot + i], NeedsFullComparison ? lFull[baseSlot + i] : default, PkAtSlot(baseSlot + i));
+                        buf.Set(written++, leafNorm[baseSlot + i], NeedsFullComparison ? leafFull[baseSlot + i] : default, PkAtSlot(baseSlot + i));
                     }
                 }
 
-                Build(buf, w, true);
+                Build(buf, written, true);
             }
             finally
             {
@@ -732,69 +732,69 @@ namespace OrdoMemory
 
         bool MergeRebuild(ReadOnlySpan<TKey> keys, ReadOnlySpan<TPrimaryKey> primaryKeys)
         {
-            var k = keys.Length;
-            var incoming = new EntryBuffer(k);
-            var order = ArrayPool<int>.Shared.Rent(k);
-            var merged = new EntryBuffer(count + k);
+            var incomingCount = keys.Length;
+            var incoming = new EntryBuffer(incomingCount);
+            var order = ArrayPool<int>.Shared.Rent(incomingCount);
+            var merged = new EntryBuffer(count + incomingCount);
             try
             {
-                for (var i = 0; i < k; i++)
+                for (var i = 0; i < incomingCount; i++)
                 {
-                    var probe = MakeProbe(keys[i], ToU(primaryKeys[i]));
+                    var probe = MakeProbe(keys[i], PkToUInt64(primaryKeys[i]));
                     incoming.Set(i, probe.Norm, keys[i], primaryKeys[i]);
                     order[i] = i;
                 }
 
                 sortComparer ??= new EntryComparer(this);
                 sortComparer.target = incoming;
-                Array.Sort(order, 0, k, sortComparer);
+                Array.Sort(order, 0, incomingCount, sortComparer);
                 sortComparer.target = default;
 
-                var w = 0;
+                var written = 0;
                 var leaf = LeftmostLeaf();
                 var pos = 0;
-                var j = 0;
-                while (j < k)
+                var incomingPos = 0;
+                while (incomingPos < incomingCount)
                 {
-                    while (leaf >= 0 && pos >= lCount[leaf])
+                    while (leaf >= 0 && pos >= leafCount[leaf])
                     {
-                        leaf = lNext[leaf];
+                        leaf = leafNext[leaf];
                         pos = 0;
                     }
 
-                    var src = order[j];
-                    var probe = new Probe(incoming.Norm[src], NeedsFullComparison ? incoming.Full[src] : default, ToU(incoming.Pk[src]));
-                    if (j > 0)
+                    var src = order[incomingPos];
+                    var probe = new Probe(incoming.Norm[src], NeedsFullComparison ? incoming.Full[src] : default, PkToUInt64(incoming.Pk[src]));
+                    if (incomingPos > 0)
                     {
-                        var prev = order[j - 1];
-                        if (Compare(incoming.Norm[prev], NeedsFullComparison ? incoming.Full[prev] : default, ToU(incoming.Pk[prev]), probe) == 0) return false;
+                        var prev = order[incomingPos - 1];
+                        if (Compare(incoming.Norm[prev], NeedsFullComparison ? incoming.Full[prev] : default, PkToUInt64(incoming.Pk[prev]), probe) == 0) return false;
                     }
 
-                    var c = leaf >= 0 ? CompareLeaf(leaf * b + pos, probe) : 1;
-                    if (c == 0) return false;
-                    if (c < 0)
+                    var comparison = leaf >= 0 ? CompareLeaf(leaf * nodeSize + pos, probe) : 1;
+                    if (comparison == 0) return false;
+                    if (comparison < 0)
                     {
-                        var slot = leaf * b + pos;
-                        merged.Set(w++, lNorm[slot], NeedsFullComparison ? lFull[slot] : default, PkAtSlot(slot));
+                        var slot = leaf * nodeSize + pos;
+                        merged.Set(written++, leafNorm[slot], NeedsFullComparison ? leafFull[slot] : default, PkAtSlot(slot));
                         pos++;
                     }
                     else
                     {
-                        merged.Set(w++, incoming.Norm[src], NeedsFullComparison ? incoming.Full[src] : default, incoming.Pk[src]);
-                        j++;
+                        merged.Set(written++, incoming.Norm[src], NeedsFullComparison ? incoming.Full[src] : default, incoming.Pk[src]);
+                        incomingPos++;
                     }
                 }
 
-                for (; leaf >= 0; leaf = lNext[leaf], pos = 0)
+                for (; leaf >= 0; leaf = leafNext[leaf], pos = 0)
                 {
-                    for (; pos < lCount[leaf]; pos++)
+                    for (; pos < leafCount[leaf]; pos++)
                     {
-                        var slot = leaf * b + pos;
-                        merged.Set(w++, lNorm[slot], NeedsFullComparison ? lFull[slot] : default, PkAtSlot(slot));
+                        var slot = leaf * nodeSize + pos;
+                        merged.Set(written++, leafNorm[slot], NeedsFullComparison ? leafFull[slot] : default, PkAtSlot(slot));
                     }
                 }
 
-                Build(merged, w, false);
+                Build(merged, written, false);
                 return true;
             }
             finally
@@ -805,88 +805,88 @@ namespace OrdoMemory
             }
         }
 
-        void Build(in EntryBuffer entries, int n, bool exact)
+        void Build(in EntryBuffer entries, int entryCount, bool exact)
         {
-            var leaves = Math.Max(1, (n + b - 1) / b);
+            var leaves = Math.Max(1, (entryCount + nodeSize - 1) / nodeSize);
             var inners = 0;
-            for (var width = leaves; width > 1; width = (width + b - 1) / b)
+            for (var width = leaves; width > 1; width = (width + nodeSize - 1) / nodeSize)
             {
-                inners += (width + b - 1) / b;
+                inners += (width + nodeSize - 1) / nodeSize;
             }
 
             PrepareLeaves(leaves, exact);
             PrepareInners(Math.Max(1, inners), exact);
             root = AllocLeaf();
             height = 0;
-            count = n;
-            if (n == 0) return;
+            count = entryCount;
+            if (entryCount == 0) return;
 
-            var level = ArrayPool<int>.Shared.Rent(leaves);
-            var upper = ArrayPool<int>.Shared.Rent((leaves + b - 1) / b);
+            var currentLevel = ArrayPool<int>.Shared.Rent(leaves);
+            var nextLevel = ArrayPool<int>.Shared.Rent((leaves + nodeSize - 1) / nodeSize);
             try
             {
                 leafUsed = 0;
                 var prevLeaf = -1;
-                for (var l = 0; l < leaves; l++)
+                for (var leafIndex = 0; leafIndex < leaves; leafIndex++)
                 {
                     var leaf = AllocLeaf();
-                    var start = l * b;
-                    var cnt = Math.Min(b, n - start);
-                    var baseSlot = leaf * b;
-                    Array.Copy(entries.Norm, start, lNorm, baseSlot, cnt);
-                    if (NeedsFullComparison) Array.Copy(entries.Full, start, lFull, baseSlot, cnt);
-                    if (!packsPk) Array.Copy(entries.Pk, start, lPk, baseSlot, cnt);
+                    var start = leafIndex * nodeSize;
+                    var leafEntryCount = Math.Min(nodeSize, entryCount - start);
+                    var baseSlot = leaf * nodeSize;
+                    Array.Copy(entries.Norm, start, leafNorm, baseSlot, leafEntryCount);
+                    if (NeedsFullComparison) Array.Copy(entries.Full, start, leafFull, baseSlot, leafEntryCount);
+                    if (!packsPk) Array.Copy(entries.Pk, start, leafPk, baseSlot, leafEntryCount);
 
-                    lCount[leaf] = cnt;
-                    lPrev[leaf] = prevLeaf;
-                    if (prevLeaf >= 0) lNext[prevLeaf] = leaf;
+                    leafCount[leaf] = leafEntryCount;
+                    leafPrev[leaf] = prevLeaf;
+                    if (prevLeaf >= 0) leafNext[prevLeaf] = leaf;
                     prevLeaf = leaf;
-                    level[l] = leaf;
+                    currentLevel[leafIndex] = leaf;
                 }
 
                 var width = leaves;
                 var isLeafLevel = true;
                 while (width > 1)
                 {
-                    var parents = (width + b - 1) / b;
-                    for (var p = 0; p < parents; p++)
+                    var parents = (width + nodeSize - 1) / nodeSize;
+                    for (var parentIndex = 0; parentIndex < parents; parentIndex++)
                     {
                         var node = AllocInner();
-                        var start = p * b;
-                        var cnt = Math.Min(b, width - start);
-                        for (var i = 0; i < cnt; i++)
+                        var start = parentIndex * nodeSize;
+                        var childCount = Math.Min(nodeSize, width - start);
+                        for (var i = 0; i < childCount; i++)
                         {
-                            var child = level[start + i];
-                            var cs = child * b;
+                            var child = currentLevel[start + i];
+                            var childFirstSlot = child * nodeSize;
                             if (isLeafLevel)
                             {
-                                SetInner(node * b + i, lNorm[cs], NeedsFullComparison ? lFull[cs] : default, comparesPk ? ToU(lPk[cs]) : 0, child);
+                                SetInner(node * nodeSize + i, leafNorm[childFirstSlot], NeedsFullComparison ? leafFull[childFirstSlot] : default, comparesPk ? PkToUInt64(leafPk[childFirstSlot]) : 0, child);
                             }
                             else
                             {
-                                SetInner(node * b + i, iNorm[cs], NeedsFullComparison ? iFull[cs] : default, comparesPk ? iPk[cs] : 0, child);
+                                SetInner(node * nodeSize + i, innerNorm[childFirstSlot], NeedsFullComparison ? innerFull[childFirstSlot] : default, comparesPk ? innerPk[childFirstSlot] : 0, child);
                             }
                         }
 
-                        iCount[node] = cnt;
-                        upper[p] = node;
+                        innerCount[node] = childCount;
+                        nextLevel[parentIndex] = node;
                     }
 
-                    var swap = level;
-                    level = upper;
-                    upper = swap;
+                    var swap = currentLevel;
+                    currentLevel = nextLevel;
+                    nextLevel = swap;
                     width = parents;
                     isLeafLevel = false;
                     height++;
                 }
 
-                root = level[0];
+                root = currentLevel[0];
                 EnsurePathCapacity();
             }
             finally
             {
-                ArrayPool<int>.Shared.Return(level);
-                ArrayPool<int>.Shared.Return(upper);
+                ArrayPool<int>.Shared.Return(currentLevel);
+                ArrayPool<int>.Shared.Return(nextLevel);
             }
         }
 
@@ -895,7 +895,7 @@ namespace OrdoMemory
             var node = root;
             for (var level = height; level > 0; level--)
             {
-                node = iChild[node * b];
+                node = innerChild[node * nodeSize];
             }
 
             return node;
@@ -907,11 +907,11 @@ namespace OrdoMemory
             public readonly TKey[] Full;
             public readonly TPrimaryKey[] Pk;
 
-            public EntryBuffer(int n)
+            public EntryBuffer(int capacity)
             {
-                Norm = ArrayPool<ulong>.Shared.Rent(Math.Max(1, n));
-                Full = NeedsFullComparison ? ArrayPool<TKey>.Shared.Rent(Math.Max(1, n)) : null;
-                Pk = ArrayPool<TPrimaryKey>.Shared.Rent(Math.Max(1, n));
+                Norm = ArrayPool<ulong>.Shared.Rent(Math.Max(1, capacity));
+                Full = NeedsFullComparison ? ArrayPool<TKey>.Shared.Rent(Math.Max(1, capacity)) : null;
+                Pk = ArrayPool<TPrimaryKey>.Shared.Rent(Math.Max(1, capacity));
             }
 
             public void Set(int i, ulong norm, TKey full, TPrimaryKey primaryKey)
@@ -942,9 +942,9 @@ namespace OrdoMemory
 
             public int Compare(int x, int y)
             {
-                var t = target;
-                var probe = new Probe(t.Norm[y], NeedsFullComparison ? t.Full[y] : default, ToU(t.Pk[y]));
-                return index.Compare(t.Norm[x], NeedsFullComparison ? t.Full[x] : default, ToU(t.Pk[x]), probe);
+                var buffer = target;
+                var probe = new Probe(buffer.Norm[y], NeedsFullComparison ? buffer.Full[y] : default, PkToUInt64(buffer.Pk[y]));
+                return index.Compare(buffer.Norm[x], NeedsFullComparison ? buffer.Full[x] : default, PkToUInt64(buffer.Pk[x]), probe);
             }
         }
 
@@ -959,19 +959,19 @@ namespace OrdoMemory
 
         void PrepareLeaves(int capacity, bool exact)
         {
-            if (exact || lCount == null || lCount.Length < capacity)
+            if (exact || leafCount == null || leafCount.Length < capacity)
             {
-                if (!exact && lCount != null) capacity = Math.Max(capacity, lCount.Length * 2);
-                lNorm = new ulong[capacity * b];
-                lFull = NeedsFullComparison ? new TKey[capacity * b] : null;
-                lPk = packsPk ? null : new TPrimaryKey[capacity * b];
-                lCount = new int[capacity];
-                lNext = new int[capacity];
-                lPrev = new int[capacity];
+                if (!exact && leafCount != null) capacity = Math.Max(capacity, leafCount.Length * 2);
+                leafNorm = new ulong[capacity * nodeSize];
+                leafFull = NeedsFullComparison ? new TKey[capacity * nodeSize] : null;
+                leafPk = packsPk ? null : new TPrimaryKey[capacity * nodeSize];
+                leafCount = new int[capacity];
+                leafNext = new int[capacity];
+                leafPrev = new int[capacity];
             }
             else if (NeedsFullComparison)
             {
-                Array.Clear(lFull, 0, leafUsed * b);
+                Array.Clear(leafFull, 0, leafUsed * nodeSize);
             }
 
             leafUsed = 0;
@@ -980,18 +980,18 @@ namespace OrdoMemory
 
         void PrepareInners(int capacity, bool exact)
         {
-            if (exact || iCount == null || iCount.Length < capacity)
+            if (exact || innerCount == null || innerCount.Length < capacity)
             {
-                if (!exact && iCount != null) capacity = Math.Max(capacity, iCount.Length * 2);
-                iNorm = new ulong[capacity * b];
-                iFull = NeedsFullComparison ? new TKey[capacity * b] : null;
-                iPk = comparesPk ? new ulong[capacity * b] : null;
-                iChild = new int[capacity * b];
-                iCount = new int[capacity];
+                if (!exact && innerCount != null) capacity = Math.Max(capacity, innerCount.Length * 2);
+                innerNorm = new ulong[capacity * nodeSize];
+                innerFull = NeedsFullComparison ? new TKey[capacity * nodeSize] : null;
+                innerPk = comparesPk ? new ulong[capacity * nodeSize] : null;
+                innerChild = new int[capacity * nodeSize];
+                innerCount = new int[capacity];
             }
             else if (NeedsFullComparison)
             {
-                Array.Clear(iFull, 0, innerUsed * b);
+                Array.Clear(innerFull, 0, innerUsed * nodeSize);
             }
 
             innerUsed = 0;
@@ -1011,33 +1011,33 @@ namespace OrdoMemory
             if (leafFree >= 0)
             {
                 leaf = leafFree;
-                leafFree = lNext[leaf];
+                leafFree = leafNext[leaf];
             }
             else
             {
-                if (leafUsed == lCount.Length)
+                if (leafUsed == leafCount.Length)
                 {
-                    var cap = lCount.Length * 2;
-                    Array.Resize(ref lNorm, cap * b);
-                    if (NeedsFullComparison) Array.Resize(ref lFull, cap * b);
-                    if (!packsPk) Array.Resize(ref lPk, cap * b);
-                    Array.Resize(ref lCount, cap);
-                    Array.Resize(ref lNext, cap);
-                    Array.Resize(ref lPrev, cap);
+                    var newCapacity = leafCount.Length * 2;
+                    Array.Resize(ref leafNorm, newCapacity * nodeSize);
+                    if (NeedsFullComparison) Array.Resize(ref leafFull, newCapacity * nodeSize);
+                    if (!packsPk) Array.Resize(ref leafPk, newCapacity * nodeSize);
+                    Array.Resize(ref leafCount, newCapacity);
+                    Array.Resize(ref leafNext, newCapacity);
+                    Array.Resize(ref leafPrev, newCapacity);
                 }
 
                 leaf = leafUsed++;
             }
 
-            lCount[leaf] = 0;
-            lNext[leaf] = -1;
-            lPrev[leaf] = -1;
+            leafCount[leaf] = 0;
+            leafNext[leaf] = -1;
+            leafPrev[leaf] = -1;
             return leaf;
         }
 
         void FreeLeaf(int leaf)
         {
-            lNext[leaf] = leafFree;
+            leafNext[leaf] = leafFree;
             leafFree = leaf;
         }
 
@@ -1047,31 +1047,31 @@ namespace OrdoMemory
             if (innerFree >= 0)
             {
                 node = innerFree;
-                innerFree = iCount[node];
+                innerFree = innerCount[node];
             }
             else
             {
-                if (innerUsed == iCount.Length)
+                if (innerUsed == innerCount.Length)
                 {
-                    var cap = iCount.Length * 2;
-                    Array.Resize(ref iNorm, cap * b);
-                    if (NeedsFullComparison) Array.Resize(ref iFull, cap * b);
-                    if (comparesPk) Array.Resize(ref iPk, cap * b);
-                    Array.Resize(ref iChild, cap * b);
-                    Array.Resize(ref iCount, cap);
+                    var newCapacity = innerCount.Length * 2;
+                    Array.Resize(ref innerNorm, newCapacity * nodeSize);
+                    if (NeedsFullComparison) Array.Resize(ref innerFull, newCapacity * nodeSize);
+                    if (comparesPk) Array.Resize(ref innerPk, newCapacity * nodeSize);
+                    Array.Resize(ref innerChild, newCapacity * nodeSize);
+                    Array.Resize(ref innerCount, newCapacity);
                 }
 
                 node = innerUsed++;
             }
 
-            iCount[node] = 0;
+            innerCount[node] = 0;
             return node;
         }
 
         void FreeInner(int node)
         {
-            if (NeedsFullComparison) Array.Clear(iFull, node * b, b);
-            iCount[node] = innerFree;
+            if (NeedsFullComparison) Array.Clear(innerFull, node * nodeSize, nodeSize);
+            innerCount[node] = innerFree;
             innerFree = node;
         }
     }
