@@ -36,6 +36,11 @@ namespace OrdoMemory.Generator.Emitting
                                  
                                      public int Capacity => __store.Capacity;
                                  
+                                     public int AvailableSlotCount => __store.AvailableSlotCount;
+                                 
+                                     public int RetiredSlotCount => __store.RetiredSlotCount;
+                                 
+                                 
                                      {{EmitInsert(model)}}
                                  
                                      {{EmitBulkInsert(model)}}
@@ -93,10 +98,6 @@ namespace OrdoMemory.Generator.Emitting
                                                                            }
                                                                            """));
 
-            // 主キーは Store で払い出されるまで決まらないため、払い出した後に主キーを差し込んだコピーを作る.
-            // Update もこのコンストラクタを使う. 利用者が同じ型の並びのコンストラクタを定義していても
-            // 引数の位置で呼び違えないよう、RowInitTag を取る専用のコンストラクタにする.
-            // Row が readonly struct でなくても隠れたコピーが起きないよう、生成するメンバーには readonly を付ける
             var thisArguments = string.Join(", ", model.Fields.Select(field => $"this.{field.Name}"));
             var rowInterface = $"global::OrdoMemory.IRow<{model.RowName}, {model.PrimaryKeyType}>";
             return Render($$"""
@@ -123,9 +124,6 @@ namespace OrdoMemory.Generator.Emitting
             var uniqueKeyIndices = keyIndices.Where(keyIndex => model.Keys[keyIndex].Unique).ToList();
             var multiKeyIndices = keyIndices.Where(keyIndex => !model.Keys[keyIndex].Unique).ToList();
 
-            // 先に容量を確保する (確保できなければ Full). TryReserve は次に払い出す主キーを変えないため、確保後に読んだ NextPrimaryKey が Store で払い出される.
-            // Unique な索引には、その主キーで Store より先に挿入し、Insert の戻り値で重複を検出する (探索は 1 回で済む).
-            // 重複した場合は、それまでに挿入した索引を取り消してから失敗を返す
             var reserve = Render($$"""
                                    if (!__store.TryReserve(1))
                                    {
@@ -165,7 +163,6 @@ namespace OrdoMemory.Generator.Emitting
                             """);
         }
 
-        // uniqueKeyIndices の先頭 count 個の索引から、挿入済みのエントリを取り除く
         static string EmitRollbackUniqueIndexes(TableModel model, List<int> uniqueKeyIndices, int count, string keyPrefix, string primaryKey)
         {
             return Each(uniqueKeyIndices.Take(count), keyIndex => $"{model.Keys[keyIndex].IndexField}.Remove({keyPrefix}{keyIndex}, {primaryKey});");
@@ -282,10 +279,7 @@ namespace OrdoMemory.Generator.Emitting
             var uniqueKeyIndices = keyIndices.Where(keyIndex => model.Keys[keyIndex].Unique).ToList();
             var anyChangedCondition = string.Join(" || ", keyIndices.Select(keyIndex => $"__changed{keyIndex}"));
 
-            // Unique な索引は、変更後の値を先に挿入して Insert の戻り値で重複を検出する (探索は 1 回で済む).
-            // 失敗した場合は、それまでに挿入した変更後の値を取り消してから失敗を返す. 書き込みはすべて成功した後に行う
 
-            // 新しい値をローカル変数に求めてから、RowInitTag を取る専用のコンストラクタで 1 回だけ作り直す
             var rebuild = Render($$"""
                                    {{Each(model.Fields, field => $"var {NextValue(field)} = {field.ParameterName}.OrElse(__current.{field.Name});")}}
                                    {{Each(keyIndices, keyIndex => EmitApplyKeyChange(model, keyIndex))}}
@@ -294,8 +288,6 @@ namespace OrdoMemory.Generator.Emitting
                                    return true;
                                    """);
 
-            // readonly のフィールドを変える場合だけ、従来どおり Record 全体を作り直す.
-            // それ以外は索引を付け替えた後、指定された readonly でないフィールドだけをその場で書き込む
             var body = rebuild;
             if (model.Fields.Any(field => !field.IsReadOnly))
             {
@@ -365,7 +357,6 @@ namespace OrdoMemory.Generator.Emitting
         {
             var key = model.Keys[keyIndex];
             var indexField = key.IndexField;
-            // Unique な索引には変更後の値を挿入済みのため、変更前の値の削除だけを行う
             return Render($$"""
                             if (__changed{{keyIndex}})
                             {

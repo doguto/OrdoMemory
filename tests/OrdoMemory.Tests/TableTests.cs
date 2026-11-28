@@ -471,6 +471,80 @@ namespace OrdoMemory.Tests
         }
 
         [Fact]
+        public void SlotCapacityIsObservable()
+        {
+            var table = new TinyRowTable();
+            Assert.Equal(4, table.AvailableSlotCount);
+            Assert.Equal(0, table.RetiredSlotCount);
+
+            var primaryKeys = new uint[4];
+            for (var i = 0; i < 4; i++)
+            {
+                Assert.Equal(InsertResult.Success, table.TryInsert(new TinyRow(i), out primaryKeys[i]));
+            }
+
+            Assert.Equal(0, table.AvailableSlotCount);
+
+            Assert.True(table.Remove(primaryKeys[0]));
+            Assert.Equal(1, table.AvailableSlotCount);
+        }
+
+        [Fact]
+        public void GenerationExhaustionRetiresSlotObservably()
+        {
+            var table = new ShortGenRowTable();
+            var maxSlots = 1 << ShortGenRowTable.SlotBits;
+            Assert.Equal(maxSlots, table.AvailableSlotCount);
+
+            for (var i = 0; i < 3; i++)
+            {
+                Assert.Equal(InsertResult.Success, table.TryInsert(new ShortGenRow(i), out var primaryKey));
+                Assert.Equal(0u, primaryKey & ((1u << ShortGenRowTable.SlotBits) - 1));
+                Assert.True(table.Remove(primaryKey));
+            }
+
+            Assert.Equal(1, table.RetiredSlotCount);
+            Assert.Equal(maxSlots - 1, table.AvailableSlotCount);
+            Assert.Equal(0, table.Count);
+        }
+
+        [Fact]
+        public void LifetimeInsertLimitIsObservable()
+        {
+            var store = new RowStore<TinyRow, uint, SixBitPrimaryKey>(0, 3);
+            Assert.Equal(8, store.AvailableSlotCount);
+
+            var inserted = 0UL;
+            while (store.TryReserve(1))
+            {
+                var primaryKey = store.Store(new TinyRow(0));
+                inserted++;
+                Assert.True(store.TryGetIndex(primaryKey, out var index));
+                store.Remove(index);
+            }
+
+            Assert.Equal(56UL, inserted);
+            Assert.Equal(0, store.Count);
+            Assert.Equal(8, store.RetiredSlotCount);
+            Assert.Equal(0, store.AvailableSlotCount);
+        }
+
+        readonly struct SixBitPrimaryKey : IPrimaryKeyTraits<uint>
+        {
+            public int Bits => 6;
+
+            public ulong ToUInt64(uint primaryKey)
+            {
+                return primaryKey;
+            }
+
+            public uint FromUInt64(ulong value)
+            {
+                return (uint)value;
+            }
+        }
+
+        [Fact]
         public void InsertResultDistinguishesFailureReasons()
         {
             var table = new TinyRowTable();
