@@ -8,15 +8,10 @@ namespace OrdoMemory.Generator.Models
 {
     sealed class TableModel
     {
-        // uint の PK の既定の配分: スロット 22 bit + 世代 10 bit.
-        // 同時に持てる件数 (2^22 = 約 419 万) と、同じスロットを再利用できる回数 (2^10 - 1 = 1023 回) の釣り合いを取った値.
         const int DefaultUInt32SlotBits = 22;
 
-        // ulong の PK の既定の配分: スロット 32 bit + 世代 32 bit.
-        // 件数は配列の長さ (int) で頭打ちになるためスロットは 32 bit あれば足り、残りをすべて世代に回す (約 43 億回).
         const int DefaultUInt64SlotBits = 32;
 
-        // ulong の PK で世代を 32 bit より広くしても、RowStore が世代を uint で持つため使い切れない
         const int MinimumUInt64SlotBits = 32;
 
         public TableModel(
@@ -73,7 +68,6 @@ namespace OrdoMemory.Generator.Models
                 return null;
             }
 
-            // partial であることを確認する. readonly struct でなくてもよい (readonly でないフィールドは Update でその場で書き換える)
             var isPartial = type.DeclaringSyntaxReferences.All(reference =>
                 reference.GetSyntax() is StructDeclarationSyntax declaration && declaration.Modifiers.Any(SyntaxKind.PartialKeyword)
             );
@@ -83,12 +77,10 @@ namespace OrdoMemory.Generator.Models
                 return null;
             }
 
-            // readonly struct でない場合、readonly でないメンバーを ref readonly / in 越しに呼ぶと隠れたコピーが起きるため警告する
             if (!type.IsReadOnly) ReportNonReadOnlyMembers(type, context);
 
             var isValid = true;
             var tableName = type.Name + "Table";
-            // PK の型は [PrimaryKey] を付けたフィールドの型 (uint / ulong) から決める
             var usesUInt64PrimaryKey = type.GetMembers().OfType<IFieldSymbol>().Any(field =>
                 !field.IsStatic &&
                 field.Type.SpecialType == SpecialType.System_UInt64 &&
@@ -144,9 +136,6 @@ namespace OrdoMemory.Generator.Models
 
                 var isPrimaryKey = field.GetAttributes().Any(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, primaryKeyAttributeType));
 
-                // PK は Record とスロットを結び付けるため、書き換えられないようにする.
-                // SecondaryKey は readonly でなくてもよい. テーブルは Record を ref readonly / コピーでしか返さないため、
-                // テーブル内の Record を書き換えられるのは Update のみで、Update は索引を付け替えてから書き込む
                 if (isPrimaryKey && !field.IsReadOnly)
                 {
                     context.ReportDiagnostic(Diagnostic.Create(Diagnostics.PrimaryKeyMustBeReadOnly, field.Locations.FirstOrDefault(), field.Name));

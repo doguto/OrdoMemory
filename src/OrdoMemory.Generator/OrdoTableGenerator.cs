@@ -49,8 +49,6 @@ namespace OrdoMemory.Generator
             }
         }
 
-        // '_' を "__" に、'.' を "_" に置き換えて、A.B_C と A_B.C が同じ名前にならないようにする.
-        // AddSource のヒント名は大文字小文字を区別せずに比べられるため、大文字小文字だけが違う型は連番で区別する.
         static string HintNameOf(INamedTypeSymbol type, HashSet<string> used)
         {
             var name = type.ToDisplayString().Replace("_", "__").Replace('.', '_');
