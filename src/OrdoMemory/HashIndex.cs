@@ -25,6 +25,11 @@ namespace OrdoMemory
             return hasNull;
         }
 
+        public int CountOf(TKey key)
+        {
+            return ContainsKey(key) ? 1 : 0;
+        }
+
         public SingleEnumerator Equal(TKey key)
         {
             var found = TryGetFirst(key, out var primaryKey);
@@ -73,6 +78,13 @@ namespace OrdoMemory
             }
 
             return true;
+        }
+
+        public void Clear()
+        {
+            map.Clear();
+            hasNull = false;
+            nullPrimaryKey = default;
         }
 
         public void TrimExcess()
@@ -137,6 +149,12 @@ namespace OrdoMemory
 
             primaryKey = postings[id][0];
             return true;
+        }
+
+        public int CountOf(TKey key)
+        {
+            var id = Find(key);
+            return id < 0 ? 0 : lengths[id];
         }
 
         public Enumerator Equal(TKey key)
@@ -219,6 +237,16 @@ namespace OrdoMemory
             }
 
             return true;
+        }
+
+        public void Clear()
+        {
+            map.Clear();
+            nullPosting = -1;
+            Array.Clear(postings, 0, postingUsed);
+            postingUsed = 0;
+            postingFree = -1;
+            count = 0;
         }
 
         public void TrimExcess()

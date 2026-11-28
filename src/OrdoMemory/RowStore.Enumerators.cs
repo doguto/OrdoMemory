@@ -1,4 +1,6 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
 namespace OrdoMemory
@@ -27,7 +29,12 @@ namespace OrdoMemory
             throw new InvalidOperationException("The table was modified during enumeration.");
         }
 
-        public readonly struct AllEnumerable
+        static void ThrowDestinationTooShort()
+        {
+            throw new ArgumentException("Destination is too short.", "destination");
+        }
+
+        public readonly struct AllEnumerable : IEnumerable<TRow>
         {
             readonly RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits> store;
 
@@ -40,9 +47,27 @@ namespace OrdoMemory
             {
                 return new AllEnumerator(store);
             }
+
+            public int CopyTo(Span<TRow> destination)
+            {
+                var count = store.denseCount;
+                if (destination.Length < count) ThrowDestinationTooShort();
+                new ReadOnlySpan<TRow>(store.dense, 0, count).CopyTo(destination);
+                return count;
+            }
+
+            IEnumerator<TRow> IEnumerable<TRow>.GetEnumerator()
+            {
+                return GetEnumerator();
+            }
+
+            IEnumerator IEnumerable.GetEnumerator()
+            {
+                return GetEnumerator();
+            }
         }
 
-        public struct AllEnumerator
+        public struct AllEnumerator : IEnumerator<TRow>
         {
             readonly RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits> store;
             readonly int version;
@@ -62,9 +87,23 @@ namespace OrdoMemory
                 store.CheckVersion(version);
                 return ++index < store.denseCount;
             }
+
+            TRow IEnumerator<TRow>.Current => Current;
+
+            object IEnumerator.Current => Current;
+
+            void IEnumerator.Reset()
+            {
+                store.CheckVersion(version);
+                index = -1;
+            }
+
+            void IDisposable.Dispose()
+            {
+            }
         }
 
-        public readonly struct SubsetEnumerable<TPrimaryKeyEnumerator> where TPrimaryKeyEnumerator : struct, IPrimaryKeyEnumerator<TPrimaryKey>
+        public readonly struct SubsetEnumerable<TPrimaryKeyEnumerator> : IEnumerable<TRow> where TPrimaryKeyEnumerator : struct, IPrimaryKeyEnumerator<TPrimaryKey>
         {
             readonly RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits> store;
             readonly TPrimaryKeyEnumerator primaryKeys;
@@ -81,9 +120,31 @@ namespace OrdoMemory
             {
                 return new SubsetEnumerator<TPrimaryKeyEnumerator>(store, primaryKeys, version);
             }
+
+            public int CopyTo(Span<TRow> destination)
+            {
+                var written = 0;
+                foreach (ref readonly var row in this)
+                {
+                    if (written == destination.Length) ThrowDestinationTooShort();
+                    destination[written++] = row;
+                }
+
+                return written;
+            }
+
+            IEnumerator<TRow> IEnumerable<TRow>.GetEnumerator()
+            {
+                return GetEnumerator();
+            }
+
+            IEnumerator IEnumerable.GetEnumerator()
+            {
+                return GetEnumerator();
+            }
         }
 
-        public struct SubsetEnumerator<TPrimaryKeyEnumerator> where TPrimaryKeyEnumerator : struct, IPrimaryKeyEnumerator<TPrimaryKey>
+        public struct SubsetEnumerator<TPrimaryKeyEnumerator> : IEnumerator<TRow> where TPrimaryKeyEnumerator : struct, IPrimaryKeyEnumerator<TPrimaryKey>
         {
             readonly RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits> store;
             readonly int version;
@@ -106,6 +167,19 @@ namespace OrdoMemory
                 if (!primaryKeys.MoveNext()) return false;
                 index = store.GetIndex(primaryKeys.Current);
                 return true;
+            }
+
+            TRow IEnumerator<TRow>.Current => Current;
+
+            object IEnumerator.Current => Current;
+
+            void IEnumerator.Reset()
+            {
+                throw new NotSupportedException();
+            }
+
+            void IDisposable.Dispose()
+            {
             }
         }
     }
