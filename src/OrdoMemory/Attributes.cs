@@ -13,7 +13,6 @@ namespace OrdoMemory
     {
         public string TableName { get; set; }
 
-        // PK のうちスロット番号に使うビット数. 残りが世代になる. 0 なら PK のフィールドの型ごとの既定値 (uint: 22, ulong: 32)
         public int SlotBits { get; set; }
     }
 
