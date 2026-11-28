@@ -10,11 +10,11 @@ namespace OrdoMemory.Benchmark
     {
         [PrimaryKey] public readonly uint Id;
 
-        [SecondaryKey] public readonly int Code;
+        [SecondaryKey(Unique = true)] public readonly int Code;
 
         [SecondaryKey(Unique = false)] public readonly int Category;
 
-        [SecondaryKey(IndexKind.Hash)] public readonly string Name;
+        [SecondaryKey(IndexKind.Hash, Unique = true)] public readonly string Name;
 
         public readonly int Value;
 

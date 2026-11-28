@@ -31,6 +31,6 @@ namespace OrdoMemory
 
         public IndexKind Kind { get; }
 
-        public bool Unique { get; set; } = true;
+        public bool Unique { get; set; }
     }
 }
