@@ -164,8 +164,8 @@ namespace OrdoMemory
         int LeafUpperBound(int leaf, in Probe probe)
         {
             var lo = 0;
-            var hi = lCount[leaf];
-            var baseSlot = leaf * b;
+            var hi = leafCount[leaf];
+            var baseSlot = leaf * nodeSize;
             while (lo < hi)
             {
                 var mid = (lo + hi) >> 1;
@@ -251,10 +251,10 @@ namespace OrdoMemory
             var n = -LeafLowerBound(leaf, lowProbe);
             while (leaf >= 0)
             {
-                var leafCount = lCount[leaf];
-                if (CompareLeaf(leaf * b + leafCount - 1, highProbe) > 0) return n + LeafUpperBound(leaf, highProbe);
-                n += leafCount;
-                leaf = lNext[leaf];
+                var entryCount = leafCount[leaf];
+                if (CompareLeaf(leaf * nodeSize + entryCount - 1, highProbe) > 0) return n + LeafUpperBound(leaf, highProbe);
+                n += entryCount;
+                leaf = leafNext[leaf];
             }
 
             return n;
@@ -696,8 +696,8 @@ namespace OrdoMemory
 
         public void Clear()
         {
-            if (lFull != null) Array.Clear(lFull, 0, lFull.Length);
-            if (iFull != null) Array.Clear(iFull, 0, iFull.Length);
+            if (leafFull != null) Array.Clear(leafFull, 0, leafFull.Length);
+            if (innerFull != null) Array.Clear(innerFull, 0, innerFull.Length);
             leafUsed = 0;
             leafFree = -1;
             innerUsed = 0;
