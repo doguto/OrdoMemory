@@ -580,7 +580,7 @@ namespace OrdoMemory.Tests
             var old = new uint[5];
             for (var i = 0; i < old.Length; i++)
             {
-                Assert.True(table.TryInsert(NewItem(i, "n", Kind.B, score: i), out old[i]));
+                Assert.Equal(InsertResult.Success, table.TryInsert(NewItem(i, "n", Kind.B, score: i), out old[i]));
             }
 
             Assert.True(table.Remove(old[2]));
@@ -608,7 +608,7 @@ namespace OrdoMemory.Tests
             var fresh = new uint[8];
             for (var i = 0; i < fresh.Length; i++)
             {
-                Assert.True(table.TryInsert(NewItem(i, "m", Kind.C, score: i), out fresh[i]));
+                Assert.Equal(InsertResult.Success, table.TryInsert(NewItem(i, "m", Kind.C, score: i), out fresh[i]));
                 Assert.DoesNotContain(fresh[i], old);
             }
 
@@ -642,10 +642,10 @@ namespace OrdoMemory.Tests
         public void ClearRetiresSaturatedSlots()
         {
             var table = new OneGenRowTable();
-            Assert.True(table.TryInsert(new OneGenRow(1), out var a));
+            Assert.Equal(InsertResult.Success, table.TryInsert(new OneGenRow(1), out var a));
             table.Clear();
             Assert.False(table.Contains(a));
-            Assert.True(table.TryInsert(new OneGenRow(2), out var b));
+            Assert.Equal(InsertResult.Success, table.TryInsert(new OneGenRow(2), out var b));
             Assert.NotEqual(a, b);
             Assert.False(table.Contains(a));
             Assert.True(table.Contains(b));
@@ -658,8 +658,8 @@ namespace OrdoMemory.Tests
             for (var round = 0; round < 3; round++)
             {
                 var keys = new uint[4];
-                for (var i = 0; i < 4; i++) Assert.True(table.TryInsert(new TinyRow(i), out keys[i]));
-                Assert.False(table.TryInsert(new TinyRow(9), out _));
+                for (var i = 0; i < 4; i++) Assert.Equal(InsertResult.Success, table.TryInsert(new TinyRow(i), out keys[i]));
+                Assert.NotEqual(InsertResult.Success, table.TryInsert(new TinyRow(9), out _));
                 table.Clear();
                 foreach (var key in keys) Assert.False(table.Contains(key));
             }
@@ -669,11 +669,11 @@ namespace OrdoMemory.Tests
         public void UpsertByUniqueKey()
         {
             var table = new ItemTable();
-            Assert.True(table.UpsertByCode(NewItem(1, "a", tag: "x"), out var first, out var inserted));
+            Assert.Equal(InsertResult.Success, table.UpsertByCode(NewItem(1, "a", tag: "x"), out var first, out var inserted));
             Assert.True(inserted);
             Assert.Equal(1, table.Count);
 
-            Assert.True(table.UpsertByCode(NewItem(1, "b", Kind.C, tag: "y", score: 5), out var again, out inserted));
+            Assert.Equal(InsertResult.Success, table.UpsertByCode(NewItem(1, "b", Kind.C, tag: "y", score: 5), out var again, out inserted));
             Assert.False(inserted);
             Assert.Equal(first, again);
             Assert.Equal(1, table.Count);
@@ -689,16 +689,16 @@ namespace OrdoMemory.Tests
             Assert.Equal(1, table.CountByName("b"));
 
             // 他の一意キーと衝突する場合は失敗し、何も変更しない
-            Assert.True(table.TryInsert(NewItem(2, tag: "z"), out _));
-            Assert.False(table.UpsertByCode(NewItem(1, "c", tag: "z"), out _, out _));
+            Assert.Equal(InsertResult.Success, table.TryInsert(NewItem(2, tag: "z"), out _));
+            Assert.Equal(InsertResult.Duplicate, table.UpsertByCode(NewItem(1, "c", tag: "z"), out _, out _));
             Assert.True(table.TryFind(first, out row));
             Assert.Equal("b", row.Name);
             Assert.Equal("y", row.Tag);
-            Assert.False(table.UpsertByTag(NewItem(2, tag: "new"), out _));
+            Assert.Equal(InsertResult.Duplicate, table.UpsertByTag(NewItem(2, tag: "new"), out _));
             Assert.Equal(2, table.Count);
 
             // Tag をキーにして Code を変更
-            Assert.True(table.UpsertByTag(NewItem(7, tag: "y"), out var byTagKey));
+            Assert.Equal(InsertResult.Success, table.UpsertByTag(NewItem(7, tag: "y"), out var byTagKey));
             Assert.Equal(first, byTagKey);
             Assert.True(table.TryFindPrimaryKeyByCode(7, out var byCode));
             Assert.Equal(first, byCode);

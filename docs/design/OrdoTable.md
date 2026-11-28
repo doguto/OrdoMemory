@@ -186,7 +186,7 @@ return ref dense[s.dense];
 - PK はテーブルが払い出すため、呼び出し側は挿入前の PK を知らない. そのため Upsert の照合には PK ではなく Unique な SecondaryKey を使い、Unique な SecondaryKey ごとに `UpsertByXxx` を生成する.
 - 指定した SecondaryKey の値を持つ Record があれば、主キー以外の全フィールドを指定した Update として扱い、PK を保ったまま引数の Record の値で置き換える (変わった SecondaryKey の索引だけを更新し、readonly でないフィールドはその場で書き込む). 無ければ Insert する.
 - 引数の Record の PK フィールドは無視する.
-- 他の Unique な SecondaryKey と衝突する場合 / 容量が足りない場合は何も変更せずに失敗する.
+- 結果は `InsertResult` で返す. 他の Unique な SecondaryKey と衝突する場合は `Duplicate`、挿入時に容量が足りない場合は `Full` を返し、何も変更しない.
 
 ### Clear
 
@@ -310,8 +310,8 @@ public sealed class SampleTable
 
     public bool Update(uint primaryKey, Optional<string> name = default, Optional<string> description = default);
     // Unique な SecondaryKey ごとに生成する (SampleRow に Unique な Tag がある場合の例)
-    public bool UpsertByTag(in SampleRow row, out uint primaryKey);
-    public bool UpsertByTag(in SampleRow row, out uint primaryKey, out bool inserted);
+    public InsertResult UpsertByTag(in SampleRow row, out uint primaryKey);
+    public InsertResult UpsertByTag(in SampleRow row, out uint primaryKey, out bool inserted);
     public bool Remove(uint primaryKey);
     public void Clear();
 

@@ -383,18 +383,20 @@ namespace OrdoMemory.Generator.Emitting
             // 既存の Record がある場合は、主キー以外の全フィールドを指定した Update として扱う (索引の付け替え・その場での書き込みは Update と同じ)
             var updateArguments = string.Join(", ", model.Fields.Select(field => $"{field.ParameterName}: row.{field.Name}"));
             return Each(model.Keys.Where(key => key.Unique), key => Render($$"""
-                                                                          public bool UpsertBy{{key.Field.Name}}(in {{rowType}} row, out {{primaryKeyType}} primaryKey) => UpsertBy{{key.Field.Name}}(in row, out primaryKey, out _);
+                                                                          public global::OrdoMemory.InsertResult UpsertBy{{key.Field.Name}}(in {{rowType}} row, out {{primaryKeyType}} primaryKey) => UpsertBy{{key.Field.Name}}(in row, out primaryKey, out _);
 
-                                                                          public bool UpsertBy{{key.Field.Name}}(in {{rowType}} row, out {{primaryKeyType}} primaryKey, out bool inserted)
+                                                                          public global::OrdoMemory.InsertResult UpsertBy{{key.Field.Name}}(in {{rowType}} row, out {{primaryKeyType}} primaryKey, out bool inserted)
                                                                           {
                                                                               if ({{key.IndexField}}.TryGetFirst({{ConvertKey(key, "row." + key.Field.Name)}}, out primaryKey))
                                                                               {
                                                                                   inserted = false;
-                                                                                  return Update(primaryKey, {{updateArguments}});
+                                                                                  // 照合した Record は存在するため、Update が失敗するのは他の Unique な SecondaryKey と重複した場合のみ
+                                                                              return Update(primaryKey, {{updateArguments}}) ? global::OrdoMemory.InsertResult.Success : global::OrdoMemory.InsertResult.Duplicate;
                                                                               }
                                                                           
-                                                                              inserted = TryInsert(in row, out primaryKey);
-                                                                              return inserted;
+                                                                              var result = TryInsert(in row, out primaryKey);
+                                                                              inserted = result == global::OrdoMemory.InsertResult.Success;
+                                                                              return result;
                                                                           }
                                                                           """), "\n\n");
         }
