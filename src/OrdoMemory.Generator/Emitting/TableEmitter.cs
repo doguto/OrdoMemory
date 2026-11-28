@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using OrdoMemory.Generator.Models;
 using static OrdoMemory.Generator.Emitting.TemplateFunctions;
@@ -86,21 +87,25 @@ namespace OrdoMemory.Generator.Emitting
                                                                            }
                                                                            """));
 
-            // 主キーは Store で払い出されるまで決まらないため、払い出した後に主キーを差し込んだコピーを作る
+            // 主キーは Store で払い出されるまで決まらないため、払い出した後に主キーを差し込んだコピーを作る.
+            // Update もこのコンストラクタを使う. 利用者が同じ型の並びのコンストラクタを定義していても
+            // 引数の位置で呼び違えないよう、RowInitTag を取る専用のコンストラクタにする.
+            // Row が readonly struct でなくても隠れたコピーが起きないよう、生成するメンバーには readonly を付ける
+            var thisArguments = string.Join(", ", model.Fields.Select(field => $"this.{field.Name}"));
             var rowInterface = $"global::OrdoMemory.IRow<{model.RowName}, {model.PrimaryKeyType}>";
             return Render($$"""
                             partial struct {{model.RowName}} : {{rowInterface}}
                             {
-                                {{model.PrimaryKeyType}} {{rowInterface}}.PrimaryKey => {{model.PrimaryKeyField}};
+                                readonly {{model.PrimaryKeyType}} {{rowInterface}}.PrimaryKey => {{model.PrimaryKeyField}};
 
-                                {{model.RowName}} {{rowInterface}}.WithPrimaryKey({{model.PrimaryKeyType}} primaryKey) => new {{model.RowName}}(primaryKey, in this);
+                                readonly {{model.RowName}} {{rowInterface}}.WithPrimaryKey({{model.PrimaryKeyType}} primaryKey) => new {{model.RowName}}(default(global::OrdoMemory.RowInitTag), primaryKey, {{thisArguments}});
 
                                 {{publicConstructor}}
 
-                                internal {{model.RowName}}({{model.PrimaryKeyType}} primaryKey, in {{model.RowName}} source)
+                                internal {{model.RowName}}(global::OrdoMemory.RowInitTag __tag, {{model.PrimaryKeyType}} primaryKey, {{parameters}})
                                 {
                                     this.{{model.PrimaryKeyField}} = primaryKey;
-                                    {{Each(model.Fields, field => $"this.{field.Name} = source.{field.Name};")}}
+                                    {{Each(model.Fields, field => $"this.{field.Name} = {field.ParameterName};")}}
                                 }
                             }
                             """);
@@ -108,25 +113,56 @@ namespace OrdoMemory.Generator.Emitting
 
         static string EmitInsert(TableModel model)
         {
-            var rejectConditions = model.Keys
-                                        .Where(key => key.Unique)
-                                        .Select(key => $"{key.IndexField}.ContainsKey({ConvertKey(key, "row." + key.Field.Name)})")
-                                        .Concat(new[] { "!__store.TryReserve(1)" });
+            var keyIndices = Enumerable.Range(0, model.Keys.Count).ToList();
+            var uniqueKeyIndices = keyIndices.Where(keyIndex => model.Keys[keyIndex].Unique).ToList();
+            var multiKeyIndices = keyIndices.Where(keyIndex => !model.Keys[keyIndex].Unique).ToList();
+
+            // 先に容量を確保する (確保できなければ Full). TryReserve は次に払い出す主キーを変えないため、確保後に読んだ NextPrimaryKey が Store で払い出される.
+            // Unique な索引には、その主キーで Store より先に挿入し、Insert の戻り値で重複を検出する (探索は 1 回で済む).
+            // 重複した場合は、それまでに挿入した索引を取り消してから失敗を返す
+            var reserve = Render($$"""
+                                   if (!__store.TryReserve(1))
+                                   {
+                                       primaryKey = InvalidPrimaryKey;
+                                       return global::OrdoMemory.InsertResult.Full;
+                                   }
+                                   {{If(uniqueKeyIndices.Count > 0, Render($$"""
+
+                                                                              var __nextPrimaryKey = __store.NextPrimaryKey;
+                                                                              {{Each(uniqueKeyIndices, keyIndex => $"var __key{keyIndex} = {ConvertKey(model.Keys[keyIndex], "row." + model.Keys[keyIndex].Field.Name)};")}}
+                                                                              {{Each(Enumerable.Range(0, uniqueKeyIndices.Count), i => EmitInsertUniqueIndex(model, uniqueKeyIndices, i))}}
+                                                                              """))}}
+                                   """);
 
             return Render($$"""
-                            public bool TryInsert(in {{model.RowFullName}} row, out {{model.PrimaryKeyType}} primaryKey)
+                            public global::OrdoMemory.InsertResult TryInsert(in {{model.RowFullName}} row, out {{model.PrimaryKeyType}} primaryKey)
                             {
-                                if ({{string.Join(" || ", rejectConditions)}})
-                                {
-                                    primaryKey = InvalidPrimaryKey;
-                                    return false;
-                                }
+                                {{reserve}}
                             
                                 primaryKey = __store.Store(in row);
-                                {{Each(model.Keys, key => $"{key.IndexField}.Insert({ConvertKey(key, "row." + key.Field.Name)}, primaryKey);")}}
-                                return true;
+                                {{Each(multiKeyIndices, keyIndex => $"{model.Keys[keyIndex].IndexField}.Insert({ConvertKey(model.Keys[keyIndex], "row." + model.Keys[keyIndex].Field.Name)}, primaryKey);")}}
+                                return global::OrdoMemory.InsertResult.Success;
                             }
                             """);
+        }
+
+        static string EmitInsertUniqueIndex(TableModel model, List<int> uniqueKeyIndices, int position)
+        {
+            var keyIndex = uniqueKeyIndices[position];
+            return Render($$"""
+                            if (!{{model.Keys[keyIndex].IndexField}}.Insert(__key{{keyIndex}}, __nextPrimaryKey))
+                            {
+                                {{EmitRollbackUniqueIndexes(model, uniqueKeyIndices, position, "__key", "__nextPrimaryKey")}}
+                                primaryKey = InvalidPrimaryKey;
+                                return global::OrdoMemory.InsertResult.Duplicate;
+                            }
+                            """);
+        }
+
+        // uniqueKeyIndices の先頭 count 個の索引から、挿入済みのエントリを取り除く
+        static string EmitRollbackUniqueIndexes(TableModel model, List<int> uniqueKeyIndices, int count, string keyPrefix, string primaryKey)
+        {
+            return Each(uniqueKeyIndices.Take(count), keyIndex => $"{model.Keys[keyIndex].IndexField}.Remove({keyPrefix}{keyIndex}, {primaryKey});");
         }
 
         static string EmitBulkInsert(TableModel model)
@@ -143,12 +179,12 @@ namespace OrdoMemory.Generator.Emitting
                                                                       """));
 
             return Render($$"""
-                            public bool TryBulkInsert(global::System.ReadOnlySpan<{{rowType}}> rows, global::System.Span<{{primaryKeyType}}> primaryKeys)
+                            public global::OrdoMemory.InsertResult TryBulkInsert(global::System.ReadOnlySpan<{{rowType}}> rows, global::System.Span<{{primaryKeyType}}> primaryKeys)
                             {
                                 if (primaryKeys.Length < rows.Length) throw new global::System.ArgumentException("primaryKeys is shorter than rows.", nameof(primaryKeys));
                                 var rowCount = rows.Length;
-                                if (rowCount == 0) return true;
-                                if (!__store.TryReserve(rowCount)) return false;
+                                if (rowCount == 0) return global::OrdoMemory.InsertResult.Success;
+                                if (!__store.TryReserve(rowCount)) return global::OrdoMemory.InsertResult.Full;
                             
                                 for (var i = 0; i < rowCount; i++)
                                 {
@@ -159,7 +195,7 @@ namespace OrdoMemory.Generator.Emitting
                             
                                 {{Each(keyIndices, keyIndex => EmitBulkInsertIndex(model, keyIndex), "\n\n")}}
                             
-                                return true;
+                                return global::OrdoMemory.InsertResult.Success;
                             }
 
                             void __RollbackBulkInsert(global::System.ReadOnlySpan<{{rowType}}> rows, global::System.ReadOnlySpan<{{primaryKeyType}}> primaryKeys, int addedIndexes)
@@ -191,7 +227,7 @@ namespace OrdoMemory.Generator.Emitting
                             if (!added{{keyIndex}})
                             {
                                 __RollbackBulkInsert(rows, stored, {{keyIndex}});
-                                return false;
+                                return global::OrdoMemory.InsertResult.Duplicate;
                             }
                             """);
         }
@@ -206,6 +242,8 @@ namespace OrdoMemory.Generator.Emitting
         {
             var rowType = model.RowFullName;
             var primaryKeyType = model.PrimaryKeyType;
+
+
             return Render($$"""
                             public bool Contains({{primaryKeyType}} primaryKey) => __store.TryGetIndex(primaryKey, out _);
 
@@ -233,11 +271,47 @@ namespace OrdoMemory.Generator.Emitting
         static string EmitUpdate(TableModel model)
         {
             var parameters = string.Join(", ", model.Fields.Select(field => $"global::OrdoMemory.Optional<{field.Type}> {field.ParameterName} = default"));
-            var arguments = string.Join(", ", model.Fields.Select(field => $"{field.ParameterName}.OrElse(__current.{field.Name})"));
+            var arguments = string.Join(", ", model.Fields.Select(NextValue));
             var keyIndices = Enumerable.Range(0, model.Keys.Count).ToList();
             var uniqueKeyIndices = keyIndices.Where(keyIndex => model.Keys[keyIndex].Unique).ToList();
-            var conflictCondition = string.Join(" || ", uniqueKeyIndices.Select(keyIndex => $"(__changed{keyIndex} && {model.Keys[keyIndex].IndexField}.ContainsKey(__newKey{keyIndex}))"));
             var anyChangedCondition = string.Join(" || ", keyIndices.Select(keyIndex => $"__changed{keyIndex}"));
+
+            // Unique な索引は、変更後の値を先に挿入して Insert の戻り値で重複を検出する (探索は 1 回で済む).
+            // 失敗した場合は、それまでに挿入した変更後の値を取り消してから失敗を返す. 書き込みはすべて成功した後に行う
+
+            // 新しい値をローカル変数に求めてから、RowInitTag を取る専用のコンストラクタで 1 回だけ作り直す
+            var rebuild = Render($$"""
+                                   {{Each(model.Fields, field => $"var {NextValue(field)} = {field.ParameterName}.OrElse(__current.{field.Name});")}}
+                                   {{Each(keyIndices, keyIndex => EmitApplyKeyChange(model, keyIndex))}}
+                                   __current = new {{model.RowFullName}}(default(global::OrdoMemory.RowInitTag), primaryKey, {{arguments}});
+                                   {{If(keyIndices.Count > 0, $"if ({anyChangedCondition}) __store.Touch();")}}
+                                   return true;
+                                   """);
+
+            // readonly のフィールドを変える場合だけ、従来どおり Record 全体を作り直す.
+            // それ以外は索引を付け替えた後、指定された readonly でないフィールドだけをその場で書き込む
+            var body = rebuild;
+            if (model.Fields.Any(field => !field.IsReadOnly))
+            {
+                var mutableKeyIndices = keyIndices.Where(keyIndex => !model.Keys[keyIndex].Field.IsReadOnly).ToList();
+                var rebuildConditions = keyIndices.Where(keyIndex => model.Keys[keyIndex].Field.IsReadOnly).Select(keyIndex => $"__changed{keyIndex}")
+                                                  .Concat(model.Fields.Where(field => field.IsReadOnly && !model.Keys.Any(key => key.Field == field)).Select(field => $"{field.ParameterName}.HasValue"))
+                                                  .ToList();
+                var mutableKeyChanged = string.Join(" || ", mutableKeyIndices.Select(keyIndex => $"__changed{keyIndex}"));
+                body = Render($$"""
+                                {{If(rebuildConditions.Count > 0, Render($$"""
+                                                                           if ({{string.Join(" || ", rebuildConditions)}})
+                                                                           {
+                                                                               {{rebuild}}
+                                                                           }
+                                                                           """))}}
+
+                                {{Each(mutableKeyIndices, keyIndex => EmitApplyKeyChange(model, keyIndex))}}
+                                {{Each(model.Fields.Where(field => !field.IsReadOnly), field => $"if ({field.ParameterName}.HasValue) __current.{field.Name} = {field.ParameterName}.Value;")}}
+                                {{If(mutableKeyIndices.Count > 0, $"if ({mutableKeyChanged}) __store.Touch();")}}
+                                return true;
+                                """);
+            }
 
             return Render($$"""
                             public bool Update({{model.PrimaryKeyType}} primaryKey, {{parameters}})
@@ -245,16 +319,17 @@ namespace OrdoMemory.Generator.Emitting
                                 if (!__store.TryGetIndex(primaryKey, out var __index)) return false;
                             
                                 ref var __current = ref __store.GetRowRef(__index);
-                                var __next = new {{model.RowFullName}}({{arguments}});
                                 {{Each(keyIndices, keyIndex => EmitDetectKeyChange(model, keyIndex))}}
-                                {{If(uniqueKeyIndices.Count > 0, $"if ({conflictCondition}) return false;")}}
-                                {{Each(keyIndices, keyIndex => EmitApplyKeyChange(model, keyIndex))}}
+                                {{Each(Enumerable.Range(0, uniqueKeyIndices.Count), i => EmitInsertChangedUniqueKey(model, uniqueKeyIndices, i))}}
                             
-                                __current = new {{model.RowFullName}}(primaryKey, in __next);
-                                {{If(keyIndices.Count > 0, $"if ({anyChangedCondition}) __store.Touch();")}}
-                                return true;
+                                {{body}}
                             }
                             """);
+        }
+
+        static string NextValue(FieldModel field)
+        {
+            return "__next_" + field.Name;
         }
 
         static string EmitDetectKeyChange(TableModel model, int keyIndex)
@@ -262,19 +337,34 @@ namespace OrdoMemory.Generator.Emitting
             var key = model.Keys[keyIndex];
             return Render($$"""
                             var __oldKey{{keyIndex}} = {{ConvertKey(key, "__current." + key.Field.Name)}};
-                            var __newKey{{keyIndex}} = {{ConvertKey(key, "__next." + key.Field.Name)}};
+                            var __newKey{{keyIndex}} = {{ConvertKey(key, $"{key.Field.ParameterName}.OrElse(__current.{key.Field.Name})")}};
                             var __changed{{keyIndex}} = !global::System.Collections.Generic.EqualityComparer<{{key.KeyType}}>.Default.Equals(__oldKey{{keyIndex}}, __newKey{{keyIndex}});
+                            """);
+        }
+
+        static string EmitInsertChangedUniqueKey(TableModel model, List<int> uniqueKeyIndices, int position)
+        {
+            var keyIndex = uniqueKeyIndices[position];
+            var rollback = Each(uniqueKeyIndices.Take(position), previous => $"if (__changed{previous}) {model.Keys[previous].IndexField}.Remove(__newKey{previous}, primaryKey);");
+            return Render($$"""
+                            if (__changed{{keyIndex}} && !{{model.Keys[keyIndex].IndexField}}.Insert(__newKey{{keyIndex}}, primaryKey))
+                            {
+                                {{rollback}}
+                                return false;
+                            }
                             """);
         }
 
         static string EmitApplyKeyChange(TableModel model, int keyIndex)
         {
-            var indexField = model.Keys[keyIndex].IndexField;
+            var key = model.Keys[keyIndex];
+            var indexField = key.IndexField;
+            // Unique な索引には変更後の値を挿入済みのため、変更前の値の削除だけを行う
             return Render($$"""
                             if (__changed{{keyIndex}})
                             {
                                 {{indexField}}.Remove(__oldKey{{keyIndex}}, primaryKey);
-                                {{indexField}}.Insert(__newKey{{keyIndex}}, primaryKey);
+                                {{If(!key.Unique, $"{indexField}.Insert(__newKey{keyIndex}, primaryKey);")}}
                             }
                             """);
         }
@@ -307,6 +397,7 @@ namespace OrdoMemory.Generator.Emitting
             var enumerableType = $"{storeType}.SubsetEnumerable<{InnerEnumeratorType(model, key)}>";
             var findFirstMethod = key.Unique ? $"TryFindBy{fieldName}" : $"TryFindFirstBy{fieldName}";
             var findFirstPrimaryKeyMethod = key.Unique ? $"TryFindPrimaryKeyBy{fieldName}" : $"TryFindFirstPrimaryKeyBy{fieldName}";
+            var findFirstRefMethod = key.Unique ? $"FindRefBy{fieldName}" : $"FindFirstRefBy{fieldName}";
 
             return Render($$"""
                             public bool {{findFirstMethod}}({{fieldType}} key, out {{rowType}} row)
@@ -319,6 +410,13 @@ namespace OrdoMemory.Generator.Emitting
                             
                                 row = default;
                                 return false;
+                            }
+
+                            public ref readonly {{rowType}} {{findFirstRefMethod}}({{fieldType}} key, out bool found)
+                            {
+                                found = {{indexField}}.TryGetFirst({{ConvertKey(key, "key")}}, out var primaryKey);
+                                if (found) return ref __store.GetRowRef(__store.GetIndex(primaryKey));
+                                return ref __notFound;
                             }
 
                             public bool {{findFirstPrimaryKeyMethod}}({{fieldType}} key, out {{model.PrimaryKeyType}} primaryKey) => {{indexField}}.TryGetFirst({{ConvertKey(key, "key")}}, out primaryKey);

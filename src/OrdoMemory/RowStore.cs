@@ -1,14 +1,17 @@
 using System;
+using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
 namespace OrdoMemory
 {
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public sealed partial class RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits>
         where TRow : struct, IRow<TRow, TPrimaryKey>
         where TPrimaryKey : unmanaged
         where TPrimaryKeyTraits : struct, IPrimaryKeyTraits<TPrimaryKey>
     {
         const int MinGrowLength = 4; // データ配列の長さ更新時の更新量の下限
+        // .NET の Array.MaxLength (1 次元配列の要素数の上限) と同じ値. netstandard2.1 には Array.MaxLength が無いため定数で持つ
         const int MaxArrayLength = 0x7FFFFFC7;
 
         // 生データを示す dense 配列の Index を持つ構造体
@@ -92,10 +95,14 @@ namespace OrdoMemory
             return ref dense[denseIndex];
         }
 
+        // 格納済みの PK から dense の位置を求める. 格納されていない PK (削除済み・無効値) は例外にする
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int GetIndex(TPrimaryKey primaryKey)
         {
-            return slots[(int)(default(TPrimaryKeyTraits).ToUInt64(primaryKey) & slotMask)].dense;
+            var value = default(TPrimaryKeyTraits).ToUInt64(primaryKey);
+            ref var s = ref slots[(int)(value & slotMask)];
+            if (s.generation != value >> slotBits || s.generation == 0) ThrowHelper.ThrowInvalidPrimaryKey(nameof(primaryKey));
+            return s.dense;
         }
 
         // Insert 前に挿入する個数分の空き容量があることを確認する
@@ -112,8 +119,18 @@ namespace OrdoMemory
             return true;
         }
 
+        // 次の Store で払い出される主キー. 状態は変えない.
+        // Store より先に索引へ挿入し、重複を Insert の戻り値で検出するために使う.
+        // TryReserve が成功した後に読むこと (スロットを使い切っている場合の値は無意味). TryReserve はこの値を変えない
+        public TPrimaryKey NextPrimaryKey => freeHead >= 0
+            ? MakePrimaryKey(slots[freeHead].generation, freeHead)
+            : MakePrimaryKey(1, slotCount);
+
+        // 事前に TryReserve で容量を確保しておくこと
         public TPrimaryKey Store(in TRow row)
         {
+            if (denseCount >= dense.Length || (freeHead < 0 && slotCount >= slots.Length)) ThrowHelper.ThrowNotReserved();
+
             int slot;
             if (freeHead >= 0)
             {
@@ -136,6 +153,8 @@ namespace OrdoMemory
 
         public void Remove(int denseIndex)
         {
+            if ((uint)denseIndex >= (uint)denseCount) ThrowHelper.ThrowArgumentOutOfRange(nameof(denseIndex));
+
             var slotIndex = SlotIndexOf(denseIndex);
             var last = denseCount - 1;
             if (denseIndex != last)

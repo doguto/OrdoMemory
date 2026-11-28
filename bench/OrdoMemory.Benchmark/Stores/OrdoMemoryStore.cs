@@ -15,7 +15,7 @@ namespace OrdoMemory.Benchmark.Stores
             }
 
             var primaryKeys = new uint[rows.Length];
-            if (!table.TryBulkInsert(items, primaryKeys)) throw new InvalidOperationException("bulk insert failed");
+            if (table.TryBulkInsert(items, primaryKeys) != InsertResult.Success) throw new InvalidOperationException("bulk insert failed");
             for (var i = 0; i < primaryKeys.Length; i++)
             {
                 keys[i] = primaryKeys[i];
@@ -24,7 +24,7 @@ namespace OrdoMemory.Benchmark.Stores
 
         public long Insert(in ItemData row)
         {
-            if (!table.TryInsert(ToItem(row), out var primaryKey)) throw new InvalidOperationException("insert failed");
+            if (table.TryInsert(ToItem(row), out var primaryKey) != InsertResult.Success) throw new InvalidOperationException("insert failed");
             return primaryKey;
         }
 

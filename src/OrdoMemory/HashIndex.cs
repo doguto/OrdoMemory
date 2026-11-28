@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 
 namespace OrdoMemory
 {
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public sealed class HashUniqueIndex<TKey, TPrimaryKey> where TPrimaryKey : unmanaged
     {
         readonly Dictionary<TKey, TPrimaryKey> map = new(KeyComparer<TKey>.Default);
@@ -100,6 +102,7 @@ namespace OrdoMemory
         }
     }
 
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public sealed class HashMultiIndex<TKey, TPrimaryKey> where TPrimaryKey : unmanaged
     {
         const int InitialPostingLength = 2;
