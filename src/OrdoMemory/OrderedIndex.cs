@@ -220,31 +220,26 @@ namespace OrdoMemory
             return Range(key, key);
         }
 
-        // 閉区間 [min, max] を昇順に列挙する.
         public RangeEnumerator Range(TKey min, TKey max)
         {
             return RangeCore(true, min, true, true, max, true, false);
         }
 
-        // 両端の開閉と列挙の向きを指定して範囲を列挙する.
         public RangeEnumerator Range(TKey min, bool minInclusive, TKey max, bool maxInclusive, bool descending)
         {
             return RangeCore(true, min, minInclusive, true, max, maxInclusive, descending);
         }
 
-        // key より大きい (inclusive なら以上の) キーを列挙する. 上端は持たない.
         public RangeEnumerator GreaterThan(TKey key, bool inclusive, bool descending)
         {
             return RangeCore(true, key, inclusive, false, default, false, descending);
         }
 
-        // key より小さい (inclusive なら以下の) キーを列挙する. 下端は持たない.
         public RangeEnumerator LessThan(TKey key, bool inclusive, bool descending)
         {
             return RangeCore(false, default, false, true, key, inclusive, descending);
         }
 
-        // 索引の全件をキー順に列挙する.
         public RangeEnumerator All(bool descending)
         {
             return RangeCore(false, default, false, false, default, false, descending);
@@ -282,7 +277,6 @@ namespace OrdoMemory
 
             if (hasMax)
             {
-                // 上端の直後 (inclusive なら max より大きい最初の要素, そうでなければ max 以上の最初の要素) の 1 つ前から始める.
                 Seek(max, maxInclusive, out leaf, out pos);
                 pos--;
             }
@@ -295,12 +289,8 @@ namespace OrdoMemory
             return new RangeEnumerator(this, leaf, pos, true, hasMin, hasMin ? traits.Normalize(min) : 0, min, minInclusive);
         }
 
-        // key 以上 (after なら key より大きい) の最初の要素の位置を求める.
-        // 該当が無い場合は最後の葉の末尾 (pos == lCount) を返す.
         void Seek(TKey key, bool after, out int leaf, out int pos)
         {
-            // 非 Unique では (key, PK) の組で並ぶため、PK を最小値 / 最大値にした組で探す.
-            // Unique では PK を比較しないため、after の場合は key と等しい要素を読み飛ばす.
             var probe = MakeProbe(key, after ? pkMask : 0);
             leaf = Descend(probe);
             pos = LeafLowerBound(leaf, probe);
@@ -333,7 +323,6 @@ namespace OrdoMemory
             int pos;
             TPrimaryKey current;
 
-            // default の RangeEnumerator は空の列挙とする (index == null).
             internal RangeEnumerator(OrderedIndex<TKey, TKeyTraits, TPrimaryKey, TPrimaryKeyTraits> index, int leaf, int pos, bool descending, bool hasEnd, ulong endNorm, TKey end, bool endInclusive)
             {
                 this.index = index;

@@ -132,7 +132,6 @@ namespace OrdoMemory.Tests
                     CheckRangeOptions(index, model, a, b);
                     if (model.Entries.Count > 0)
                     {
-                        // 索引に実在するキーを境界にして、等しいキーの扱いを確かめる
                         var c = model.Entries[rnd.Next(model.Entries.Count)].Key;
                         var d = model.Entries[rnd.Next(model.Entries.Count)].Key;
                         CheckRangeOptions(index, model, c, d);
@@ -176,7 +175,6 @@ namespace OrdoMemory.Tests
         [InlineData(false)]
         public void RangeOptionsWithManyDuplicates(bool unique)
         {
-            // 同じキーが複数の葉にまたがる場合と、PK が最大値の要素を含む場合
             var index = new OrderedIndex<int, Int32Key, uint, UInt32PrimaryKey>(unique, 4);
             var model = new Model<int>(Comparer<int>.Default);
             uint primaryKey = 1;

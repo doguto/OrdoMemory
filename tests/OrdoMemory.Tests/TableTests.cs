@@ -344,7 +344,6 @@ namespace OrdoMemory.Tests
             {
                 IEnumerable<T> Order<T>(IEnumerable<(int Code, string Name, double Score)> q, Func<(int Code, string Name, double Score), T> key, IComparer<T> comparer)
                 {
-                    // 非 Unique 索引は (キー, PK) 順に並ぶ. PK は挿入順に増えるため、同じキーの中では Code の順になる
                     var ordered = q.OrderBy(key, comparer).ThenBy(r => r.Code).ToList();
                     if (descending) ordered.Reverse();
                     return ordered.Select(r => key(r));
@@ -389,7 +388,6 @@ namespace OrdoMemory.Tests
                 Assert.Equal(Order(rows, r => r.Name, StringComparer.Ordinal), all);
             }
 
-            // 既存の呼び出し (閉区間・昇順) はそのまま使える
             var closed = new List<int>();
             foreach (ref readonly var r in table.FindRangeByCode(-50, 49)) closed.Add(r.Code);
             Assert.Equal(rows.Select(r => r.Code).Where(c => c >= -50 && c <= 49).OrderBy(c => c), closed);
