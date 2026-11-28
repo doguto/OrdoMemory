@@ -336,7 +336,7 @@ namespace OrdoMemory.Tests
                 var code = i * 3 - 200;
                 var name = rnd.Next(20) == 0 ? null : new string('a', rnd.Next(0, 3)) + (char)('a' + rnd.Next(4)) + (rnd.Next(2) == 0 ? "" : "zz");
                 var score = rnd.Next(-5, 6) * 0.5;
-                Assert.True(table.TryInsert(NewItem(code, name, score: score), out _));
+                Assert.Equal(InsertResult.Success, table.TryInsert(NewItem(code, name, score: score), out _));
                 rows.Add((code, name, score));
             }
 
