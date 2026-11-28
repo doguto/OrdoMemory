@@ -388,6 +388,117 @@ namespace OrdoMemory.Tests
         }
 
         [Fact]
+        public void AddRangeRebuildReusesArrays()
+        {
+            const int n = 100_000;
+            const int k = 10_000;
+            var index = new OrderedIndex<int, Int32Key, uint, UInt32PrimaryKey>(false);
+            var keys = new int[n];
+            var primaryKeys = new uint[n];
+            for (var i = 0; i < n; i++)
+            {
+                keys[i] = i * 2;
+                primaryKeys[i] = (uint)i + 1;
+            }
+
+            Assert.True(index.AddRange(keys, primaryKeys));
+
+            var batchKeys = new int[k];
+            var batchPrimaryKeys = new uint[k];
+            for (var i = 0; i < k; i++)
+            {
+                batchKeys[i] = i * 20 + 1;
+                batchPrimaryKeys[i] = (uint)(n + i + 1);
+            }
+
+            void Round()
+            {
+                // k >= n / 16 なので作り直しの経路を通る.
+                Assert.True(index.AddRange(batchKeys, batchPrimaryKeys));
+                for (var i = 0; i < k; i++)
+                {
+                    Assert.True(index.Remove(batchKeys[i], batchPrimaryKeys[i]));
+                }
+            }
+
+            for (var i = 0; i < 3; i++) Round();
+
+            const int rounds = 5;
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            for (var i = 0; i < rounds; i++) Round();
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            // 葉の正規化キーだけで n * 8 バイトある. 作り直しのたびに確保し直していればこれを大きく超える.
+            Assert.True(allocated < n * 8 / 4, $"allocated {allocated} bytes in {rounds} rounds");
+            Assert.Equal(n, index.Count);
+
+            var e = index.Range(int.MinValue, int.MaxValue);
+            var expected = 0;
+            while (e.MoveNext())
+            {
+                Assert.Equal((uint)expected + 1, e.Current);
+                expected++;
+            }
+
+            Assert.Equal(n, expected);
+        }
+
+        [Theory]
+        [InlineData(11, false)]
+        [InlineData(12, true)]
+        public void AddRangeRebuildRepeatedString(int seed, bool unique)
+        {
+            var rnd = new Random(seed);
+            var index = new OrderedIndex<string, StringKey, uint, UInt32PrimaryKey>(unique, 4);
+            var reference = new SortedSet<(string Key, uint PrimaryKey)>(Comparer<(string Key, uint PrimaryKey)>.Create((x, y) =>
+            {
+                var c = string.CompareOrdinal(x.Key, y.Key);
+                return c != 0 ? c : x.PrimaryKey.CompareTo(y.PrimaryKey);
+            }));
+            var present = new HashSet<string>();
+            uint nextPrimaryKey = 1;
+
+            for (var round = 0; round < 60; round++)
+            {
+                // 既存件数の 1/16 以上をまとめて入れ、作り直しの経路を通す.
+                var k = Math.Max(1, reference.Count / 4 + rnd.Next(1, 20));
+                var keys = new List<string>();
+                var primaryKeys = new List<uint>();
+                for (var i = 0; i < k; i++)
+                {
+                    var key = "k" + rnd.Next(0, 2000).ToString("D5");
+                    if (unique && (present.Contains(key) || keys.Contains(key))) continue;
+                    keys.Add(key);
+                    primaryKeys.Add(nextPrimaryKey++);
+                }
+
+                Assert.True(index.AddRange(keys.ToArray(), primaryKeys.ToArray()));
+                for (var i = 0; i < keys.Count; i++)
+                {
+                    reference.Add((keys[i], primaryKeys[i]));
+                    present.Add(keys[i]);
+                }
+
+                var victims = reference.Where(_ => rnd.Next(3) == 0).ToList();
+                foreach (var v in victims)
+                {
+                    Assert.True(index.Remove(v.Key, v.PrimaryKey));
+                    reference.Remove(v);
+                    present.Remove(v.Key);
+                }
+
+                if (round % 15 == 14) index.TrimExcess();
+
+                Assert.Equal(reference.Count, index.Count);
+                Assert.Equal(reference.Select(x => (ulong)x.PrimaryKey), Collect(index.Range("", "￿")));
+                var a = "k" + rnd.Next(0, 2000).ToString("D5");
+                var b = "k" + rnd.Next(0, 2000).ToString("D5");
+                var expected = reference.Where(x => string.CompareOrdinal(x.Key, a) >= 0 && string.CompareOrdinal(x.Key, b) <= 0).Select(x => (ulong)x.PrimaryKey);
+                Assert.Equal(expected, Collect(index.Range(a, b)));
+            }
+        }
+
+        [Fact]
         public void HashMultiIndex()
         {
             var index = new HashMultiIndex<string, uint>();

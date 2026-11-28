@@ -671,7 +671,7 @@ namespace OrdoMemory
                     }
                 }
 
-                Build(buf, w);
+                Build(buf, w, true);
             }
             finally
             {
@@ -743,7 +743,7 @@ namespace OrdoMemory
                     }
                 }
 
-                Build(merged, w);
+                Build(merged, w, false);
                 return true;
             }
             finally
@@ -754,7 +754,10 @@ namespace OrdoMemory
             }
         }
 
-        void Build(in EntryBuffer entries, int n)
+        // exact = true (TrimExcess) なら必要な分だけ確保し直す.
+        // false なら容量が足りる限り既存の配列を使い回し、足りなければ倍以上に広げて確保する.
+        // 呼び出し側は entries を木とは別のバッファに集め終えているため、使い回しても読み途中のデータは壊れない.
+        void Build(in EntryBuffer entries, int n, bool exact)
         {
             var leaves = Math.Max(1, (n + b - 1) / b);
             var inners = 0;
@@ -763,7 +766,10 @@ namespace OrdoMemory
                 inners += (width + b - 1) / b;
             }
 
-            Reset(leaves, Math.Max(1, inners));
+            PrepareLeaves(leaves, exact);
+            PrepareInners(Math.Max(1, inners), exact);
+            root = AllocLeaf();
+            height = 0;
             count = n;
             if (n == 0) return;
 
@@ -896,26 +902,53 @@ namespace OrdoMemory
 
         void Reset(int leafCapacity, int innerCapacity)
         {
-            lNorm = new ulong[leafCapacity * b];
-            lFull = NeedsFullComparison ? new TKey[leafCapacity * b] : null;
-            lPk = packsPk ? null : new TPrimaryKey[leafCapacity * b];
-            lCount = new int[leafCapacity];
-            lNext = new int[leafCapacity];
-            lPrev = new int[leafCapacity];
-            leafUsed = 0;
-            leafFree = -1;
-
-            iNorm = new ulong[innerCapacity * b];
-            iFull = NeedsFullComparison ? new TKey[innerCapacity * b] : null;
-            iPk = comparesPk ? new ulong[innerCapacity * b] : null;
-            iChild = new int[innerCapacity * b];
-            iCount = new int[innerCapacity];
-            innerUsed = 0;
-            innerFree = -1;
-
+            PrepareLeaves(leafCapacity, true);
+            PrepareInners(innerCapacity, true);
             root = AllocLeaf();
             height = 0;
             count = 0;
+        }
+
+        void PrepareLeaves(int capacity, bool exact)
+        {
+            if (exact || lCount == null || lCount.Length < capacity)
+            {
+                if (!exact && lCount != null) capacity = Math.Max(capacity, lCount.Length * 2);
+                lNorm = new ulong[capacity * b];
+                lFull = NeedsFullComparison ? new TKey[capacity * b] : null;
+                lPk = packsPk ? null : new TPrimaryKey[capacity * b];
+                lCount = new int[capacity];
+                lNext = new int[capacity];
+                lPrev = new int[capacity];
+            }
+            else if (NeedsFullComparison)
+            {
+                // 参照を残さないよう、使っていた範囲のキーを消す.
+                Array.Clear(lFull, 0, leafUsed * b);
+            }
+
+            leafUsed = 0;
+            leafFree = -1;
+        }
+
+        void PrepareInners(int capacity, bool exact)
+        {
+            if (exact || iCount == null || iCount.Length < capacity)
+            {
+                if (!exact && iCount != null) capacity = Math.Max(capacity, iCount.Length * 2);
+                iNorm = new ulong[capacity * b];
+                iFull = NeedsFullComparison ? new TKey[capacity * b] : null;
+                iPk = comparesPk ? new ulong[capacity * b] : null;
+                iChild = new int[capacity * b];
+                iCount = new int[capacity];
+            }
+            else if (NeedsFullComparison)
+            {
+                Array.Clear(iFull, 0, innerUsed * b);
+            }
+
+            innerUsed = 0;
+            innerFree = -1;
         }
 
         void EnsurePathCapacity()
