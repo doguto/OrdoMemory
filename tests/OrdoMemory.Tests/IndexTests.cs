@@ -532,24 +532,20 @@ namespace OrdoMemory.Tests
         {
             var index = new HashMultiIndex<int, uint>();
 
-            // 値ごとの PK 配列を確保させてから全て消す
             Churn(index, 0, 256);
 
-            // 新しい値の挿入・削除を繰り返しても PK 配列を確保しない
             var before = GC.GetAllocatedBytesForCurrentThread();
             for (var round = 1; round <= 8; round++) Churn(index, round * 1000, 256);
             var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
             Assert.Equal(0, allocated);
             Assert.Equal(0, index.Count);
 
-            // 使い回した配列に古い PK が見えない
             index.Insert(1, 10);
             index.Insert(2, 20);
             index.Insert(2, 21);
             AssertPostings(index, 1, 10);
             AssertPostings(index, 2, 20, 21);
 
-            // 長い配列を持つ値を消しても、他の値の挿入・TrimExcess が正しく動く
             for (uint pk = 100; pk < 200; pk++) index.Insert(3, pk);
             for (uint pk = 100; pk < 200; pk++) Assert.True(index.Remove(3, pk));
             Assert.False(index.ContainsKey(3));

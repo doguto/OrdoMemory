@@ -107,7 +107,6 @@ namespace OrdoMemory
     {
         const int InitialPostingLength = 2;
 
-        // 空いた値の PK 配列は、この長さ以下なら次の値で使い回す. 長い配列を空き枠に残し続けないため
         const int MaxPooledPostingLength = 16;
 
         readonly Dictionary<TKey, int> map = new(KeyComparer<TKey>.Default);
@@ -115,7 +114,6 @@ namespace OrdoMemory
 
         TPrimaryKey[][] postings = new TPrimaryKey[4][];
 
-        // 使用中の枠は PK の件数. 空き枠は空きリストの次の枠を -2 - next で持つ (負の値で空き枠と分かる)
         int[] lengths = new int[4];
         int postingUsed;
         int postingFree = -1;
@@ -231,7 +229,6 @@ namespace OrdoMemory
                 var length = lengths[id];
                 if (length < 0)
                 {
-                    // 空き枠に残した配列は手放す
                     postings[id] = null;
                     continue;
                 }
@@ -265,7 +262,6 @@ namespace OrdoMemory
                 id = postingUsed++;
             }
 
-            // 空き枠に配列が残っていれば使い回す
             if (postings[id] == null) postings[id] = new TPrimaryKey[InitialPostingLength];
             lengths[id] = 0;
             return id;
@@ -273,7 +269,6 @@ namespace OrdoMemory
 
         void FreePosting(int id)
         {
-            // 短い配列は枠に残して次の AllocatePosting で使い回す. TPrimaryKey は unmanaged のため消去は不要
             if (postings[id].Length > MaxPooledPostingLength) postings[id] = null;
             lengths[id] = -2 - postingFree;
             postingFree = id;
