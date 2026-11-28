@@ -604,7 +604,6 @@ namespace OrdoMemory.Tests
             Assert.Equal(0, table.CountByKind(Kind.B));
             Assert.Empty(table.FindRangeByScore(0, 10));
 
-            // 削除済みの一意キーも再挿入できる
             var fresh = new uint[8];
             for (var i = 0; i < fresh.Length; i++)
             {
@@ -688,7 +687,6 @@ namespace OrdoMemory.Tests
             Assert.Equal(0, table.CountByName("a"));
             Assert.Equal(1, table.CountByName("b"));
 
-            // 他の一意キーと衝突する場合は失敗し、何も変更しない
             Assert.Equal(InsertResult.Success, table.TryInsert(NewItem(2, tag: "z"), out _));
             Assert.Equal(InsertResult.Duplicate, table.UpsertByCode(NewItem(1, "c", tag: "z"), out _, out _));
             Assert.True(table.TryFind(first, out row));
@@ -697,7 +695,6 @@ namespace OrdoMemory.Tests
             Assert.Equal(InsertResult.Duplicate, table.UpsertByTag(NewItem(2, tag: "new"), out _));
             Assert.Equal(2, table.Count);
 
-            // Tag をキーにして Code を変更
             Assert.Equal(InsertResult.Success, table.UpsertByTag(NewItem(7, tag: "y"), out var byTagKey));
             Assert.Equal(first, byTagKey);
             Assert.True(table.TryFindPrimaryKeyByCode(7, out var byCode));
@@ -755,7 +752,6 @@ namespace OrdoMemory.Tests
             Assert.Equal(new[] { 2, 3, 4 }, buffer.Take(3).Select(r => r.Code));
             Assert.Throws<ArgumentException>(() => table.FindRangeByCode(2, 4).CopyTo(new Item[2]));
 
-            // 列挙中の変更は boxing 経由でも検知される
             using var e = ((IEnumerable<Item>)table.All()).GetEnumerator();
             Assert.True(e.MoveNext());
             table.TryInsert(NewItem(100), out _);

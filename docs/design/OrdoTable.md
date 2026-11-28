@@ -183,23 +183,17 @@ return ref dense[s.dense];
 
 ### Upsert
 
-- PK はテーブルが払い出すため、呼び出し側は挿入前の PK を知らない. そのため Upsert の照合には PK ではなく Unique な SecondaryKey を使い、Unique な SecondaryKey ごとに `UpsertByXxx` を生成する.
-- 指定した SecondaryKey の値を持つ Record があれば、主キー以外の全フィールドを指定した Update として扱い、PK を保ったまま引数の Record の値で置き換える (変わった SecondaryKey の索引だけを更新し、readonly でないフィールドはその場で書き込む). 無ければ Insert する.
-- 引数の Record の PK フィールドは無視する.
-- 結果は `InsertResult` で返す. 他の Unique な SecondaryKey と衝突する場合は `Duplicate`、挿入時に容量が足りない場合は `Full` を返し、何も変更しない.
+- PK は挿入前に分からないため、Unique な SecondaryKey ごとに `UpsertByXxx` を生成して照合する.
+- あれば PK 以外の全フィールドを Update し、無ければ Insert する. 結果は `InsertResult` で返す.
 
 ### Clear
 
-- 全 Record を削除し、全ての二次索引を空にする.
-- 世代を 1 に巻き戻すと、Clear 前に払い出した PK が新しい Record と一致してしまう. そのため `slots` は捨てず、生存していた各スロットに Remove と同じ処理 (世代を進めて空きリストへ戻す / 一周した場合は使用を止める) を行う.
-- `dense` は `default` で消す. 配列の容量はそのまま残す.
+- 全 Record と索引を空にする. 世代は巻き戻さず Remove と同じく進めるため、Clear 前の PK は無効になる. 容量は残す.
 
 ### All
 
 - `dense[0 .. count)` を先頭から読む. 順序は保証しない (Remove のたびに変わる).
-- `foreach` では struct の列挙子を使い、アロケーションは発生しない.
-- LINQ や既存のコレクション API に渡せるよう、列挙用の struct (`All` / `FindAllByXxx` / `FindRangeByXxx` の戻り値) は `IEnumerable<T>` を明示実装する. この経路では列挙子の boxing が発生する.
-- `CopyTo(Span<T>)` で列挙結果を Span に書き出せる. 書き出した件数を返し、Span が足りない場合は例外とする.
+- 列挙用の struct は `IEnumerable<T>` を明示実装する (LINQ 経由では boxing が起きる). `CopyTo(Span<T>)` で書き出せる.
 
 ---
 
@@ -210,7 +204,6 @@ return ref dense[s.dense];
 - 次の操作の後は、`ref readonly` で受け取った参照を取り直す.
   - Remove: 末尾の Record が移動するため.
   - Insert / BulkInsert / Upsert: 配列の拡張で再確保されるため.
-  - Clear: 全ての Record が消えるため.
 - 列挙中の Insert / Remove / Clear は `version` で検出し、例外とする.
   - SecondaryKey が変わらない Update は構造を変えないため, 列挙中でも行える.
 
@@ -309,7 +302,6 @@ public sealed class SampleTable
     public ref readonly SampleRow FindRef(uint primaryKey, out bool found);
 
     public bool Update(uint primaryKey, Optional<string> name = default, Optional<string> description = default);
-    // Unique な SecondaryKey ごとに生成する (SampleRow に Unique な Tag がある場合の例)
     public InsertResult UpsertByTag(in SampleRow row, out uint primaryKey);
     public InsertResult UpsertByTag(in SampleRow row, out uint primaryKey, out bool inserted);
     public bool Remove(uint primaryKey);
@@ -327,7 +319,7 @@ public sealed class SampleTable
 }
 ```
 
-- 列挙は struct で返す (`foreach (ref readonly var row in table.All())`). 返す struct は `IEnumerable<T>` を明示実装し、`CopyTo(Span<T>)` を持つ.
+- 列挙は struct で返す (`foreach (ref readonly var row in table.All())`).
 - `FindRef` / `FindRefByXxx` / `FindFirstRefByXxx` は Record をコピーせず `ref readonly` で返す. 見つからない場合は `found = false` とし、`default` の Record への参照を返す. 参照はテーブルを変更する (Insert / Update / Remove / TrimExcess) までの間だけ有効.
 - 比較子は struct をジェネリクスで受けるか、生成コードに埋め込む (仮想呼び出しを避けるため).
 - 単一スレッド前提とする.
@@ -350,7 +342,7 @@ public sealed class SampleTable
 | Update | **O(1)** + SecondaryKey が変わった索引ごとに削除 + 挿入 | SecondaryKey が変わらなければ O(1) |
 | Upsert | 照合する索引の検索 + Update または Insert | |
 | Remove | **O(1)** + 索引からの削除 × I | 末尾の Record を移すだけ |
-| Clear | **O(n)** + 索引の初期化 × I | 生存していたスロットの世代を進める. 配列は再確保しない |
+| Clear | **O(n)** + 索引の初期化 × I | |
 | All | **O(n)** | n は生存件数. 削除の履歴に依らない |
 | TrimExcess | O(n) + 索引の作り直し | |
 
@@ -365,7 +357,7 @@ public sealed class SampleTable
 | FindAllByXxx | O(log n + m) | 平均 O(1 + m) |
 | FindRangeByXxx | O(log n + m) | 不可 |
 | CountByXxx (Unique) | O(log n) | 平均 O(1) |
-| CountByXxx (非 Unique) | O(log n + m) | 平均 O(1) (値ごとの PK 配列の長さを返す) |
+| CountByXxx (非 Unique) | O(log n + m) | 平均 O(1) |
 | 一括挿入 (k 件) | O(k log(n+k)), 作り直す場合 O((n+k) + k log k) | 平均 O(k) |
 
 - Ordered: ノードの大きさ B は定数 (64). 高さ log_B n, ノード内の探索とずらしが O(B) で、合わせて O(log n). ノードの分割は償却 O(1).

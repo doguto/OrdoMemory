@@ -375,12 +375,10 @@ namespace OrdoMemory.Generator.Emitting
                             """);
         }
 
-        // 主キーはストアが払い出すため、Upsert の照合には一意セカンダリキーを使う
         static string EmitUpsert(TableModel model)
         {
             var rowType = model.RowFullName;
             var primaryKeyType = model.PrimaryKeyType;
-            // 既存の Record がある場合は、主キー以外の全フィールドを指定した Update として扱う (索引の付け替え・その場での書き込みは Update と同じ)
             var updateArguments = string.Join(", ", model.Fields.Select(field => $"{field.ParameterName}: row.{field.Name}"));
             return Each(model.Keys.Where(key => key.Unique), key => Render($$"""
                                                                           public global::OrdoMemory.InsertResult UpsertBy{{key.Field.Name}}(in {{rowType}} row, out {{primaryKeyType}} primaryKey) => UpsertBy{{key.Field.Name}}(in row, out primaryKey, out _);
@@ -390,7 +388,6 @@ namespace OrdoMemory.Generator.Emitting
                                                                               if ({{key.IndexField}}.TryGetFirst({{ConvertKey(key, "row." + key.Field.Name)}}, out primaryKey))
                                                                               {
                                                                                   inserted = false;
-                                                                                  // 照合した Record は存在するため、Update が失敗するのは他の Unique な SecondaryKey と重複した場合のみ
                                                                               return Update(primaryKey, {{updateArguments}}) ? global::OrdoMemory.InsertResult.Success : global::OrdoMemory.InsertResult.Duplicate;
                                                                               }
                                                                           

@@ -215,7 +215,6 @@ namespace OrdoMemory
             return false;
         }
 
-        // 一意なら O(log n)、重複ありなら該当件数 k に対し O(log n + k)
         public int CountOf(TKey key)
         {
             var e = Equal(key);
@@ -667,7 +666,6 @@ namespace OrdoMemory
             return MergeRebuild(keys, primaryKeys);
         }
 
-        // 確保済みの配列は再利用し、ノードの割り当て状態だけを初期化する
         public void Clear()
         {
             if (lFull != null) Array.Clear(lFull, 0, lFull.Length);

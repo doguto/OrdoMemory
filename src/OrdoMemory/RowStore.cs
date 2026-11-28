@@ -172,7 +172,6 @@ namespace OrdoMemory
             version++;
         }
 
-        // slot の世代を進めて空きリストへ戻す
         void FreeSlot(int slotIndex)
         {
             ref var slot = ref slots[slotIndex];
@@ -190,8 +189,6 @@ namespace OrdoMemory
             }
         }
 
-        // 全 Record を削除する
-        // 世代を巻き戻すと古い主キーが再び有効になってしまうため、Remove と同じく各 slot の世代を進めて空きリストへ戻す
         public void Clear()
         {
             for (var i = 0; i < denseCount; i++)

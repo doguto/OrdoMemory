@@ -34,8 +34,6 @@ namespace OrdoMemory
             throw new ArgumentException("Destination is too short.", "destination");
         }
 
-        // foreach では struct の GetEnumerator を使い割り当てなしで列挙する
-        // LINQ 等へ渡す場合は IEnumerable<TRow> の明示実装を経由する (boxing が発生する)
         public readonly struct AllEnumerable : IEnumerable<TRow>
         {
             readonly RowStore<TRow, TPrimaryKey, TPrimaryKeyTraits> store;
@@ -50,7 +48,6 @@ namespace OrdoMemory
                 return new AllEnumerator(store);
             }
 
-            // 全 Record を destination の先頭へコピーし、コピーした件数を返す
             public int CopyTo(Span<TRow> destination)
             {
                 var count = store.denseCount;
@@ -124,8 +121,6 @@ namespace OrdoMemory
                 return new SubsetEnumerator<TPrimaryKeyEnumerator>(store, primaryKeys, version);
             }
 
-            // 対象の Record を destination の先頭へコピーし、コピーした件数を返す
-            // 件数は列挙するまで分からないため、destination が足りなくなった時点で例外を投げる
             public int CopyTo(Span<TRow> destination)
             {
                 var written = 0;
@@ -178,7 +173,6 @@ namespace OrdoMemory
 
             object IEnumerator.Current => Current;
 
-            // 主キー列挙子は巻き戻せないため Reset は未サポート
             void IEnumerator.Reset()
             {
                 throw new NotSupportedException();
