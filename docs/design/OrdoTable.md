@@ -141,7 +141,7 @@ return ref dense[s.dense];
 
 #### 失敗理由
 
-Insert / BulkInsert は次の 2 つの理由で失敗する. 理由は `out InsertResult` を取るオーバーロードで受け取れる.
+`TryInsert` / `TryBulkInsert` は結果を `InsertResult` で返す. 失敗する理由は次の 2 つ.
 
 | `InsertResult` | 意味 |
 |---|---|
@@ -269,10 +269,8 @@ public sealed class SampleTable
 {
     public const uint InvalidPrimaryKey = 0;
 
-    public bool TryInsert(in SampleRow row, out uint primaryKey);
-    public bool TryInsert(in SampleRow row, out uint primaryKey, out InsertResult result);
-    public bool TryBulkInsert(ReadOnlySpan<SampleRow> rows, Span<uint> primaryKeys);
-    public bool TryBulkInsert(ReadOnlySpan<SampleRow> rows, Span<uint> primaryKeys, out InsertResult result);
+    public InsertResult TryInsert(in SampleRow row, out uint primaryKey);
+    public InsertResult TryBulkInsert(ReadOnlySpan<SampleRow> rows, Span<uint> primaryKeys);
 
     public bool TryFind(uint primaryKey, out SampleRow row);
     public ref readonly SampleRow FindRef(uint primaryKey, out bool found);

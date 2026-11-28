@@ -121,29 +121,24 @@ namespace OrdoMemory.Generator.Emitting
                                                                            if ({{string.Join(" || ", duplicateConditions)}})
                                                                            {
                                                                                primaryKey = InvalidPrimaryKey;
-                                                                               result = global::OrdoMemory.InsertResult.Duplicate;
-                                                                               return false;
+                                                                               return global::OrdoMemory.InsertResult.Duplicate;
                                                                            }
                                                                            """));
 
             return Render($$"""
-                            public bool TryInsert(in {{model.RowFullName}} row, out {{model.PrimaryKeyType}} primaryKey) => TryInsert(in row, out primaryKey, out _);
-
-                            public bool TryInsert(in {{model.RowFullName}} row, out {{model.PrimaryKeyType}} primaryKey, out global::OrdoMemory.InsertResult result)
+                            public global::OrdoMemory.InsertResult TryInsert(in {{model.RowFullName}} row, out {{model.PrimaryKeyType}} primaryKey)
                             {
                                 {{rejectDuplicate}}
                             
                                 if (!__store.TryReserve(1))
                                 {
                                     primaryKey = InvalidPrimaryKey;
-                                    result = global::OrdoMemory.InsertResult.Full;
-                                    return false;
+                                    return global::OrdoMemory.InsertResult.Full;
                                 }
                             
                                 primaryKey = __store.Store(in row);
                                 {{Each(model.Keys, key => $"{key.IndexField}.Insert({ConvertKey(key, "row." + key.Field.Name)}, primaryKey);")}}
-                                result = global::OrdoMemory.InsertResult.Success;
-                                return true;
+                                return global::OrdoMemory.InsertResult.Success;
                             }
                             """);
         }
@@ -162,19 +157,12 @@ namespace OrdoMemory.Generator.Emitting
                                                                       """));
 
             return Render($$"""
-                            public bool TryBulkInsert(global::System.ReadOnlySpan<{{rowType}}> rows, global::System.Span<{{primaryKeyType}}> primaryKeys) => TryBulkInsert(rows, primaryKeys, out _);
-
-                            public bool TryBulkInsert(global::System.ReadOnlySpan<{{rowType}}> rows, global::System.Span<{{primaryKeyType}}> primaryKeys, out global::OrdoMemory.InsertResult result)
+                            public global::OrdoMemory.InsertResult TryBulkInsert(global::System.ReadOnlySpan<{{rowType}}> rows, global::System.Span<{{primaryKeyType}}> primaryKeys)
                             {
                                 if (primaryKeys.Length < rows.Length) throw new global::System.ArgumentException("primaryKeys is shorter than rows.", nameof(primaryKeys));
-                                result = global::OrdoMemory.InsertResult.Success;
                                 var rowCount = rows.Length;
-                                if (rowCount == 0) return true;
-                                if (!__store.TryReserve(rowCount))
-                                {
-                                    result = global::OrdoMemory.InsertResult.Full;
-                                    return false;
-                                }
+                                if (rowCount == 0) return global::OrdoMemory.InsertResult.Success;
+                                if (!__store.TryReserve(rowCount)) return global::OrdoMemory.InsertResult.Full;
                             
                                 for (var i = 0; i < rowCount; i++)
                                 {
@@ -185,7 +173,7 @@ namespace OrdoMemory.Generator.Emitting
                             
                                 {{Each(keyIndices, keyIndex => EmitBulkInsertIndex(model, keyIndex), "\n\n")}}
                             
-                                return true;
+                                return global::OrdoMemory.InsertResult.Success;
                             }
 
                             void __RollbackBulkInsert(global::System.ReadOnlySpan<{{rowType}}> rows, global::System.ReadOnlySpan<{{primaryKeyType}}> primaryKeys, int addedIndexes)
@@ -217,8 +205,7 @@ namespace OrdoMemory.Generator.Emitting
                             if (!added{{keyIndex}})
                             {
                                 __RollbackBulkInsert(rows, stored, {{keyIndex}});
-                                result = global::OrdoMemory.InsertResult.Duplicate;
-                                return false;
+                                return global::OrdoMemory.InsertResult.Duplicate;
                             }
                             """);
         }
