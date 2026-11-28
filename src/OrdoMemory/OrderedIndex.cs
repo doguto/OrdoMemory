@@ -6,26 +6,6 @@ using System.Runtime.CompilerServices;
 
 namespace OrdoMemory
 {
-    // SoA (Structure of Arrays) 形式の B+Tree によるソート済みインデックス。
-    //
-    // メモリレイアウト:
-    // - 葉ノードと内部ノードはそれぞれ別のフラットな配列群に格納し、ノードは int の番号で参照する。
-    // - ノード i のエントリはスロット [i * nodeSize, (i + 1) * nodeSize) を占め、
-    //   有効なのは先頭の leafCount[i] / innerCount[i] 件。
-    // - 葉: leafNorm / leafFull / leafPk がスロット単位、leafCount / leafNext / leafPrev がノード単位。
-    //   葉は leafNext / leafPrev による双方向リンクリストで昇順に連結される (終端は -1)。
-    // - 内部: innerNorm / innerFull / innerPk / innerChild がスロット単位、innerCount がノード単位。
-    //   スロット j は子 innerChild[j] の部分木の下限をセパレータとして持つ (先頭スロットのキーは探索に影響しない)。
-    // - 解放済みノードはフリーリストで再利用する。leafFree は leafNext、innerFree は innerCount を次要素へのリンクとして流用する。
-    // - Remove で充填が 1/4 以下になった葉は、同じ親の隣の葉と併合するか隣の葉から借りる。内部ノードは空になるまで縮めない。
-    // - Build (一括再構築) は容量が足りる限り既存の配列を使い回す。
-    //
-    // キーの表現:
-    // - norm はキーを順序を保って ulong に正規化した値。NeedsFullComparison のときだけ *Full に元のキーを持ち、norm が等しい場合に比較する。
-    // - packsPk (非ユニーク、かつ !NeedsFullComparison、かつ NormalizedBits + pkBits <= 64) のとき
-    //   norm = (正規化キー << pkBits) | 主キー とし、主キーは norm の下位 pkBits ビットから復元する。このとき leafPk / innerPk は確保しない。
-    // - comparesPk (非ユニークで pack できない) のときは leafPk / innerPk を持ち、キーが等しいエントリを主キーで順序付ける。
-    // - ユニークの場合は主キーを比較に使わないため innerPk を持たない。
     [EditorBrowsable(EditorBrowsableState.Never)]
     public sealed class OrderedIndex<TKey, TKeyTraits, TPrimaryKey, TPrimaryKeyTraits>
         where TKeyTraits : struct, IOrderedKeyTraits<TKey>
@@ -510,7 +490,6 @@ namespace OrdoMemory
         }
 
         // 充填が 1/4 以下になった葉を、同じ親の隣の葉と併合するか、隣の葉から借りて均す.
-        // 触るのは葉 2 枚と親 1 つだけなので O(nodeSize) で済む. 内部ノードは空になるまで縮めない.
         void Rebalance(int leaf, int leafEntryCount)
         {
             var parent = pathNode[1];
