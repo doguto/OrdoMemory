@@ -250,6 +250,254 @@ namespace OrdoMemory.Tests
             Assert.Equal(default(DoubleKey).Normalize(KeyConvert.Double(-0.0)), default(DoubleKey).Normalize(0.0));
         }
 
+        static void RunRemoveHeavy<TKey, TKT, TPrimaryKey, TPT>(bool unique, int nodeSize, Func<Random, TKey> nextKey, IComparer<TKey> comparer, int seed)
+            where TKT : struct, IOrderedKeyTraits<TKey>
+            where TPrimaryKey : unmanaged
+            where TPT : struct, IPrimaryKeyTraits<TPrimaryKey>
+        {
+            var rnd = new Random(seed);
+            var index = new OrderedIndex<TKey, TKT, TPrimaryKey, TPT>(unique, nodeSize);
+            var reference = new SortedSet<(TKey Key, ulong PrimaryKey)>(Comparer<(TKey Key, ulong PrimaryKey)>.Create((x, y) =>
+            {
+                var c = comparer.Compare(x.Key, y.Key);
+                return c != 0 ? c : x.PrimaryKey.CompareTo(y.PrimaryKey);
+            }));
+            var entries = new List<(TKey Key, ulong PrimaryKey)>();
+            var traits = default(TPT);
+            ulong nextPrimaryKey = 1;
+
+            void Check()
+            {
+                Assert.Equal(reference.Count, index.Count);
+                var a = nextKey(rnd);
+                var b = nextKey(rnd);
+                Assert.Equal(reference.Where(e => comparer.Compare(e.Key, a) >= 0 && comparer.Compare(e.Key, b) <= 0).Select(e => e.PrimaryKey), Collect(index.Range(a, b)));
+                Assert.Equal(reference.Where(e => comparer.Compare(e.Key, a) == 0).Select(e => e.PrimaryKey), Collect(index.Equal(a)));
+            }
+
+            // 増やす局面と減らす局面を交互に繰り返し、併合と借り入れを何度も起こす.
+            for (var phase = 0; phase < 8; phase++)
+            {
+                var grow = phase % 2 == 0;
+                var steps = grow ? 1500 : 1400;
+                for (var step = 0; step < steps; step++)
+                {
+                    var insert = grow ? rnd.Next(10) < 8 : rnd.Next(10) < 2;
+                    if (insert || entries.Count == 0)
+                    {
+                        var key = nextKey(rnd);
+                        var primaryKey = nextPrimaryKey++;
+                        var exists = unique && reference.Any(e => comparer.Compare(e.Key, key) == 0);
+                        Assert.Equal(!exists, index.Insert(key, traits.FromUInt64(primaryKey)));
+                        if (exists) continue;
+                        reference.Add((key, primaryKey));
+                        entries.Add((key, primaryKey));
+                    }
+                    else
+                    {
+                        var i = rnd.Next(entries.Count);
+                        var victim = entries[i];
+                        entries[i] = entries[entries.Count - 1];
+                        entries.RemoveAt(entries.Count - 1);
+                        Assert.True(index.Remove(victim.Key, traits.FromUInt64(victim.PrimaryKey)));
+                        Assert.False(index.Remove(victim.Key, traits.FromUInt64(victim.PrimaryKey)));
+                        reference.Remove(victim);
+                    }
+
+                    if (step % 50 == 0) Check();
+                }
+
+                Assert.Equal(reference.Select(e => e.PrimaryKey), Collect(index.Range(reference.Min.Key, reference.Max.Key)));
+            }
+
+            foreach (var e in entries)
+            {
+                Assert.True(index.Remove(e.Key, traits.FromUInt64(e.PrimaryKey)));
+            }
+
+            Assert.Equal(0, index.Count);
+            Assert.True(index.Insert(nextKey(rnd), traits.FromUInt64(nextPrimaryKey)));
+        }
+
+        [Theory]
+        [InlineData(21, 4)]
+        [InlineData(22, 8)]
+        public void RemoveHeavyIntPacked(int seed, int nodeSize)
+        {
+            RunRemoveHeavy<int, Int32Key, uint, UInt32PrimaryKey>(false, nodeSize, r => r.Next(-200, 200), Comparer<int>.Default, seed);
+        }
+
+        [Theory]
+        [InlineData(23, 4)]
+        [InlineData(24, 8)]
+        public void RemoveHeavyIntUnique(int seed, int nodeSize)
+        {
+            RunRemoveHeavy<int, Int32Key, uint, UInt32PrimaryKey>(true, nodeSize, r => r.Next(-3000, 3000), Comparer<int>.Default, seed);
+        }
+
+        [Theory]
+        [InlineData(25, 5)]
+        public void RemoveHeavyLongNonUnique(int seed, int nodeSize)
+        {
+            RunRemoveHeavy<long, Int64Key, uint, UInt32PrimaryKey>(false, nodeSize, r => r.Next(-100, 100) * (long)uint.MaxValue, Comparer<long>.Default, seed);
+        }
+
+        [Theory]
+        [InlineData(26, 4)]
+        [InlineData(27, 8)]
+        public void RemoveHeavyStringNonUnique(int seed, int nodeSize)
+        {
+            RunRemoveHeavy<string, StringKey, uint, UInt32PrimaryKey>(false, nodeSize, RandomString, StringComparer.Ordinal, seed);
+        }
+
+        [Fact]
+        public void RemoveKeepsLeavesFilled()
+        {
+            const int nodeSize = 16;
+            const int n = 20_000;
+            var index = new OrderedIndex<int, Int32Key, uint, UInt32PrimaryKey>(true, nodeSize);
+            var rnd = new Random(28);
+            var keys = Enumerable.Range(0, n).OrderBy(_ => rnd.Next()).ToArray();
+            foreach (var key in keys) Assert.True(index.Insert(key, (uint)key));
+
+            // ランダムに 9 割を消す. 併合しなければ葉はほぼそのまま残り、1 枚あたり 1 件程度になる.
+            for (var i = 0; i < n * 9 / 10; i++) Assert.True(index.Remove(keys[i], (uint)keys[i]));
+
+            var leafCount = CountLeaves(index);
+            Assert.True(index.Count > leafCount * (nodeSize / 4), $"count {index.Count}, leaves {leafCount}");
+            Assert.Equal(keys.Skip(n * 9 / 10).OrderBy(x => x).Select(x => (ulong)x), Collect(index.Range(int.MinValue, int.MaxValue)));
+        }
+
+        static int CountLeaves<TKey, TKT, TPrimaryKey, TPT>(OrderedIndex<TKey, TKT, TPrimaryKey, TPT> index)
+            where TKT : struct, IOrderedKeyTraits<TKey>
+            where TPrimaryKey : unmanaged
+            where TPT : struct, IPrimaryKeyTraits<TPrimaryKey>
+        {
+            const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var type = index.GetType();
+            var nodeSize = (int)type.GetField("nodeSize", flags).GetValue(index);
+            var node = (int)type.GetField("root", flags).GetValue(index);
+            var height = (int)type.GetField("height", flags).GetValue(index);
+            var innerChild = (int[])type.GetField("innerChild", flags).GetValue(index);
+            var leafNext = (int[])type.GetField("leafNext", flags).GetValue(index);
+            for (var level = height; level > 0; level--) node = innerChild[node * nodeSize];
+
+            var leaves = 0;
+            for (; node >= 0; node = leafNext[node]) leaves++;
+            return leaves;
+        }
+
+        [Fact]
+        public void AddRangeRebuildReusesArrays()
+        {
+            const int n = 100_000;
+            const int k = 10_000;
+            var index = new OrderedIndex<int, Int32Key, uint, UInt32PrimaryKey>(false);
+            var keys = new int[n];
+            var primaryKeys = new uint[n];
+            for (var i = 0; i < n; i++)
+            {
+                keys[i] = i * 2;
+                primaryKeys[i] = (uint)i + 1;
+            }
+
+            Assert.True(index.AddRange(keys, primaryKeys));
+
+            var batchKeys = new int[k];
+            var batchPrimaryKeys = new uint[k];
+            for (var i = 0; i < k; i++)
+            {
+                batchKeys[i] = i * 20 + 1;
+                batchPrimaryKeys[i] = (uint)(n + i + 1);
+            }
+
+            void Round()
+            {
+                // k >= n / 16 なので作り直しの経路を通る.
+                Assert.True(index.AddRange(batchKeys, batchPrimaryKeys));
+                for (var i = 0; i < k; i++)
+                {
+                    Assert.True(index.Remove(batchKeys[i], batchPrimaryKeys[i]));
+                }
+            }
+
+            for (var i = 0; i < 3; i++) Round();
+
+            const int rounds = 5;
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            for (var i = 0; i < rounds; i++) Round();
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            // 葉の正規化キーだけで n * 8 バイトある. 作り直しのたびに確保し直していればこれを大きく超える.
+            Assert.True(allocated < n * 8 / 4, $"allocated {allocated} bytes in {rounds} rounds");
+            Assert.Equal(n, index.Count);
+
+            var e = index.Range(int.MinValue, int.MaxValue);
+            var expected = 0;
+            while (e.MoveNext())
+            {
+                Assert.Equal((uint)expected + 1, e.Current);
+                expected++;
+            }
+
+            Assert.Equal(n, expected);
+        }
+
+        [Theory]
+        [InlineData(11, false)]
+        [InlineData(12, true)]
+        public void AddRangeRebuildRepeatedString(int seed, bool unique)
+        {
+            var rnd = new Random(seed);
+            var index = new OrderedIndex<string, StringKey, uint, UInt32PrimaryKey>(unique, 4);
+            var reference = new SortedSet<(string Key, uint PrimaryKey)>(Comparer<(string Key, uint PrimaryKey)>.Create((x, y) =>
+            {
+                var c = string.CompareOrdinal(x.Key, y.Key);
+                return c != 0 ? c : x.PrimaryKey.CompareTo(y.PrimaryKey);
+            }));
+            var present = new HashSet<string>();
+            uint nextPrimaryKey = 1;
+
+            for (var round = 0; round < 60; round++)
+            {
+                // 既存件数の 1/16 以上をまとめて入れ、作り直しの経路を通す.
+                var k = Math.Max(1, reference.Count / 4 + rnd.Next(1, 20));
+                var keys = new List<string>();
+                var primaryKeys = new List<uint>();
+                for (var i = 0; i < k; i++)
+                {
+                    var key = "k" + rnd.Next(0, 2000).ToString("D5");
+                    if (unique && (present.Contains(key) || keys.Contains(key))) continue;
+                    keys.Add(key);
+                    primaryKeys.Add(nextPrimaryKey++);
+                }
+
+                Assert.True(index.AddRange(keys.ToArray(), primaryKeys.ToArray()));
+                for (var i = 0; i < keys.Count; i++)
+                {
+                    reference.Add((keys[i], primaryKeys[i]));
+                    present.Add(keys[i]);
+                }
+
+                var victims = reference.Where(_ => rnd.Next(3) == 0).ToList();
+                foreach (var v in victims)
+                {
+                    Assert.True(index.Remove(v.Key, v.PrimaryKey));
+                    reference.Remove(v);
+                    present.Remove(v.Key);
+                }
+
+                if (round % 15 == 14) index.TrimExcess();
+
+                Assert.Equal(reference.Count, index.Count);
+                Assert.Equal(reference.Select(x => (ulong)x.PrimaryKey), Collect(index.Range("", "￿")));
+                var a = "k" + rnd.Next(0, 2000).ToString("D5");
+                var b = "k" + rnd.Next(0, 2000).ToString("D5");
+                var expected = reference.Where(x => string.CompareOrdinal(x.Key, a) >= 0 && string.CompareOrdinal(x.Key, b) <= 0).Select(x => (ulong)x.PrimaryKey);
+                Assert.Equal(expected, Collect(index.Range(a, b)));
+            }
+        }
+
         [Fact]
         public void HashMultiIndex()
         {

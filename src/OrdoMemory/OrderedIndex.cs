@@ -17,11 +17,13 @@ namespace OrdoMemory
     // - 内部: innerNorm / innerFull / innerPk / innerChild がスロット単位、innerCount がノード単位。
     //   スロット j は子 innerChild[j] の部分木の下限をセパレータとして持つ (先頭スロットのキーは探索に影響しない)。
     // - 解放済みノードはフリーリストで再利用する。leafFree は leafNext、innerFree は innerCount を次要素へのリンクとして流用する。
+    // - Remove で充填が 1/4 以下になった葉は、同じ親の隣の葉と併合するか隣の葉から借りる。内部ノードは空になるまで縮めない。
+    // - Build (一括再構築) は容量が足りる限り既存の配列を使い回す。
     //
     // キーの表現:
     // - norm はキーを順序を保って ulong に正規化した値。NeedsFullComparison のときだけ *Full に元のキーを持ち、norm が等しい場合に比較する。
-    // - packsPk (非ユニークかつ !NeedsFullComparison かつ NormalizedBits + pkBits <= 64) のとき norm = (正規化キー << pkBits) | 主キー とし、
-    //   主キーは norm の下位 pkBits ビットから復元する。このとき leafPk / innerPk は確保しない。
+    // - packsPk (非ユニーク、かつ !NeedsFullComparison、かつ NormalizedBits + pkBits <= 64) のとき
+    //   norm = (正規化キー << pkBits) | 主キー とし、主キーは norm の下位 pkBits ビットから復元する。このとき leafPk / innerPk は確保しない。
     // - comparesPk (非ユニークで pack できない) のときは leafPk / innerPk を持ち、キーが等しいエントリを主キーで順序付ける。
     // - ユニークの場合は主キーを比較に使わないため innerPk を持たない。
     [EditorBrowsable(EditorBrowsableState.Never)]
@@ -492,17 +494,121 @@ namespace OrdoMemory
             leafCount[leaf] = newCount;
             count--;
 
-            if (newCount == 0 && height > 0)
+            if (height == 0) return true;
+
+            if (newCount == 0)
             {
-                var prev = leafPrev[leaf];
-                var next = leafNext[leaf];
-                if (prev >= 0) leafNext[prev] = next;
-                if (next >= 0) leafPrev[next] = prev;
-                FreeLeaf(leaf);
+                UnlinkAndFreeLeaf(leaf);
                 RemoveFromParent(1);
+            }
+            else if (newCount <= nodeSize / 4)
+            {
+                Rebalance(leaf, newCount);
             }
 
             return true;
+        }
+
+        // 充填が 1/4 以下になった葉を、同じ親の隣の葉と併合するか、隣の葉から借りて均す.
+        // 触るのは葉 2 枚と親 1 つだけなので O(nodeSize) で済む. 内部ノードは空になるまで縮めない.
+        void Rebalance(int leaf, int leafEntryCount)
+        {
+            var parent = pathNode[1];
+            var pos = pathPos[1];
+            var parentBase = parent * nodeSize;
+            if (pos > 0)
+            {
+                var left = innerChild[parentBase + pos - 1];
+                var siblingCount = leafCount[left];
+                if (siblingCount + leafEntryCount <= nodeSize)
+                {
+                    // 左の葉の末尾へ移し、この葉を外す.
+                    CopyLeafEntries(leaf, 0, left, siblingCount, leafEntryCount);
+                    leafCount[left] = siblingCount + leafEntryCount;
+                    leafCount[leaf] = 0;
+                    UnlinkAndFreeLeaf(leaf);
+                    RemoveFromParent(1);
+                    return;
+                }
+
+                // 左の葉の末尾から借りる. この葉の最小キーが変わるため区切りを更新する.
+                var borrowCount = (siblingCount - leafEntryCount) / 2;
+                CopyLeafEntries(leaf, 0, leaf, borrowCount, leafEntryCount);
+                CopyLeafEntries(left, siblingCount - borrowCount, leaf, 0, borrowCount);
+                leafCount[left] = siblingCount - borrowCount;
+                leafCount[leaf] = leafEntryCount + borrowCount;
+                SetSeparator(parentBase + pos, leaf);
+                return;
+            }
+
+            if (pos + 1 < innerCount[parent])
+            {
+                var right = innerChild[parentBase + pos + 1];
+                var siblingCount = leafCount[right];
+                if (siblingCount + leafEntryCount <= nodeSize)
+                {
+                    // 右の葉をこの葉の末尾へ移し、右の葉を外す.
+                    CopyLeafEntries(right, 0, leaf, leafEntryCount, siblingCount);
+                    leafCount[leaf] = leafEntryCount + siblingCount;
+                    leafCount[right] = 0;
+                    UnlinkAndFreeLeaf(right);
+                    pathPos[1] = pos + 1;
+                    RemoveFromParent(1);
+                    return;
+                }
+
+                // 右の葉の先頭から借りる. 右の葉の最小キーが変わるため区切りを更新する.
+                var borrowCount = (siblingCount - leafEntryCount) / 2;
+                CopyLeafEntries(right, 0, leaf, leafEntryCount, borrowCount);
+                CopyLeafEntries(right, borrowCount, right, 0, siblingCount - borrowCount);
+                leafCount[leaf] = leafEntryCount + borrowCount;
+                leafCount[right] = siblingCount - borrowCount;
+                SetSeparator(parentBase + pos + 1, right);
+            }
+        }
+
+        // 重なりのある移動にも使える. 移動元で使わなくなった範囲のキーは消す.
+        void CopyLeafEntries(int fromLeaf, int fromPos, int toLeaf, int toPos, int length)
+        {
+            if (length <= 0) return;
+            var src = fromLeaf * nodeSize + fromPos;
+            var dst = toLeaf * nodeSize + toPos;
+            Array.Copy(leafNorm, src, leafNorm, dst, length);
+            if (NeedsFullComparison)
+            {
+                Array.Copy(leafFull, src, leafFull, dst, length);
+                if (src + length <= dst || dst + length <= src)
+                {
+                    Array.Clear(leafFull, src, length);
+                }
+                else if (src < dst)
+                {
+                    Array.Clear(leafFull, src, dst - src);
+                }
+                else
+                {
+                    Array.Clear(leafFull, dst + length, src - dst);
+                }
+            }
+
+            if (!packsPk) Array.Copy(leafPk, src, leafPk, dst, length);
+        }
+
+        void SetSeparator(int innerSlot, int leaf)
+        {
+            var leafFirstSlot = leaf * nodeSize;
+            innerNorm[innerSlot] = leafNorm[leafFirstSlot];
+            if (NeedsFullComparison) innerFull[innerSlot] = leafFull[leafFirstSlot];
+            if (comparesPk) innerPk[innerSlot] = PkToUInt64(leafPk[leafFirstSlot]);
+        }
+
+        void UnlinkAndFreeLeaf(int leaf)
+        {
+            var prev = leafPrev[leaf];
+            var next = leafNext[leaf];
+            if (prev >= 0) leafNext[prev] = next;
+            if (next >= 0) leafPrev[next] = prev;
+            FreeLeaf(leaf);
         }
 
         void RemoveFromParent(int level)
@@ -585,7 +691,7 @@ namespace OrdoMemory
                     }
                 }
 
-                Build(buf, written);
+                Build(buf, written, true);
             }
             finally
             {
@@ -657,7 +763,7 @@ namespace OrdoMemory
                     }
                 }
 
-                Build(merged, written);
+                Build(merged, written, false);
                 return true;
             }
             finally
@@ -668,7 +774,10 @@ namespace OrdoMemory
             }
         }
 
-        void Build(in EntryBuffer entries, int entryCount)
+        // exact = true (TrimExcess) なら必要な分だけ確保し直す.
+        // false なら容量が足りる限り既存の配列を使い回し、足りなければ倍以上に広げて確保する.
+        // 呼び出し側は entries を木とは別のバッファに集め終えているため、使い回しても読み途中のデータは壊れない.
+        void Build(in EntryBuffer entries, int entryCount, bool exact)
         {
             var leaves = Math.Max(1, (entryCount + nodeSize - 1) / nodeSize);
             var inners = 0;
@@ -677,7 +786,10 @@ namespace OrdoMemory
                 inners += (width + nodeSize - 1) / nodeSize;
             }
 
-            Reset(leaves, Math.Max(1, inners));
+            PrepareLeaves(leaves, exact);
+            PrepareInners(Math.Max(1, inners), exact);
+            root = AllocLeaf();
+            height = 0;
             count = entryCount;
             if (entryCount == 0) return;
 
@@ -810,26 +922,53 @@ namespace OrdoMemory
 
         void Reset(int leafCapacity, int innerCapacity)
         {
-            leafNorm = new ulong[leafCapacity * nodeSize];
-            leafFull = NeedsFullComparison ? new TKey[leafCapacity * nodeSize] : null;
-            leafPk = packsPk ? null : new TPrimaryKey[leafCapacity * nodeSize];
-            leafCount = new int[leafCapacity];
-            leafNext = new int[leafCapacity];
-            leafPrev = new int[leafCapacity];
-            leafUsed = 0;
-            leafFree = -1;
-
-            innerNorm = new ulong[innerCapacity * nodeSize];
-            innerFull = NeedsFullComparison ? new TKey[innerCapacity * nodeSize] : null;
-            innerPk = comparesPk ? new ulong[innerCapacity * nodeSize] : null;
-            innerChild = new int[innerCapacity * nodeSize];
-            innerCount = new int[innerCapacity];
-            innerUsed = 0;
-            innerFree = -1;
-
+            PrepareLeaves(leafCapacity, true);
+            PrepareInners(innerCapacity, true);
             root = AllocLeaf();
             height = 0;
             count = 0;
+        }
+
+        void PrepareLeaves(int capacity, bool exact)
+        {
+            if (exact || leafCount == null || leafCount.Length < capacity)
+            {
+                if (!exact && leafCount != null) capacity = Math.Max(capacity, leafCount.Length * 2);
+                leafNorm = new ulong[capacity * nodeSize];
+                leafFull = NeedsFullComparison ? new TKey[capacity * nodeSize] : null;
+                leafPk = packsPk ? null : new TPrimaryKey[capacity * nodeSize];
+                leafCount = new int[capacity];
+                leafNext = new int[capacity];
+                leafPrev = new int[capacity];
+            }
+            else if (NeedsFullComparison)
+            {
+                // 参照を残さないよう、使っていた範囲のキーを消す.
+                Array.Clear(leafFull, 0, leafUsed * nodeSize);
+            }
+
+            leafUsed = 0;
+            leafFree = -1;
+        }
+
+        void PrepareInners(int capacity, bool exact)
+        {
+            if (exact || innerCount == null || innerCount.Length < capacity)
+            {
+                if (!exact && innerCount != null) capacity = Math.Max(capacity, innerCount.Length * 2);
+                innerNorm = new ulong[capacity * nodeSize];
+                innerFull = NeedsFullComparison ? new TKey[capacity * nodeSize] : null;
+                innerPk = comparesPk ? new ulong[capacity * nodeSize] : null;
+                innerChild = new int[capacity * nodeSize];
+                innerCount = new int[capacity];
+            }
+            else if (NeedsFullComparison)
+            {
+                Array.Clear(innerFull, 0, innerUsed * nodeSize);
+            }
+
+            innerUsed = 0;
+            innerFree = -1;
         }
 
         void EnsurePathCapacity()

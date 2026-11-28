@@ -11,6 +11,7 @@ namespace OrdoMemory
         where TPrimaryKeyTraits : struct, IPrimaryKeyTraits<TPrimaryKey>
     {
         const int MinGrowLength = 4; // データ配列の長さ更新時の更新量の下限
+        // .NET の Array.MaxLength (1 次元配列の要素数の上限) と同じ値. netstandard2.1 には Array.MaxLength が無いため定数で持つ
         const int MaxArrayLength = 0x7FFFFFC7;
 
         // 生データを示す dense 配列の Index を持つ構造体
@@ -117,6 +118,13 @@ namespace OrdoMemory
             EnsureCapacity(ref slots, slotCount + newSlotCount);
             return true;
         }
+
+        // 次の Store で払い出される主キー. 状態は変えない.
+        // Store より先に索引へ挿入し、重複を Insert の戻り値で検出するために使う.
+        // TryReserve が成功した後に読むこと (スロットを使い切っている場合の値は無意味). TryReserve はこの値を変えない
+        public TPrimaryKey NextPrimaryKey => freeHead >= 0
+            ? MakePrimaryKey(slots[freeHead].generation, freeHead)
+            : MakePrimaryKey(1, slotCount);
 
         // 事前に TryReserve で容量を確保しておくこと
         public TPrimaryKey Store(in TRow row)
